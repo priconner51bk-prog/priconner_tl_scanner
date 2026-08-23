@@ -1,0 +1,16 @@
+[google]
+service_account_json=json
+new_arrivals_spreadsheet_id=id
+damages_spreadsheet_id=id
+
+[discord]
+webhook_url=url
+
+[youtube]
+period_days=7
+search_limit=20
+
+[monitor]
+runtime_dir=
+stages=youtube-channel,youtube-search,worrychefs
+python=python3
