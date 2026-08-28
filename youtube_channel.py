@@ -34,6 +34,7 @@ class YTDLPChannel:
             "quiet": True,
             "skip_download": True,
             "extract_flat": False,
+            "ignoreerrors": True,
             "remote_components": ["ejs:github"],
             "playlistend": DEFAULT_CHANNEL_LIMIT,
         }

@@ -7,11 +7,34 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import monitor_runner
+import youtube_channel
 import youtube_search
 from runtime_utils import acquire_lock, run_locked
 
 
 class SafetyTests(unittest.TestCase):
+    def test_channel_extraction_ignores_unavailable_videos(self):
+        captured = {}
+
+        class FakeYDL:
+            def __init__(self, options):
+                captured.update(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, *_args, **_kwargs):
+                return {"channel": "test", "entries": [None]}
+
+        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
+            channel = youtube_channel.YTDLPChannel("https://example.test/channel")
+
+        self.assertTrue(captured["ignoreerrors"])
+        self.assertEqual(channel.videos, [])
+
     def test_parse_stages_removes_duplicate_stage_names(self):
         self.assertEqual(
             monitor_runner.parse_stages("youtube-search,youtube-search,worrychefs"),
