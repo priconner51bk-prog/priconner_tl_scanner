@@ -117,6 +117,8 @@ def findYouTubeVideo(
     videoUrls = sheetVideo.col_values(5)
     channelIds = sheetChannel.col_values(2)
     channel_name_cache = {}
+    channel_values = []
+    video_values = []
 
     for bossName in bossNames:
         print(f"ボス名：{bossName}")
@@ -148,7 +150,7 @@ def findYouTubeVideo(
             channelName = channel_name_cache[channelUrl]
 
             if channelId not in channelIds:
-                channelValues = [
+                channel_values.append(
                     [
                         "",
                         channelId,
@@ -157,15 +159,14 @@ def findYouTubeVideo(
                         publishDate,
                         nowScanTime,
                     ]
-                ]
-                print(channelValues)
-                sheetChannel.insert_rows(channelValues, row=2)
+                )
+                print(channel_values[-1:])
                 channelIds.append(channelId)
-                sleep(wait_time)
 
-            videoValues = [[channelName, channelUrl, publishDate, videoTitle, videoUrl]]
-            print(videoValues)
-            sheetVideo.insert_rows(videoValues, row=2)
+            video_values.append(
+                [channelName, channelUrl, publishDate, videoTitle, videoUrl]
+            )
+            print(video_values[-1:])
             videoUrls.append(videoUrl)
 
             count += 1
@@ -175,15 +176,22 @@ def findYouTubeVideo(
 
         sleep(wait_time)
 
+    if channel_values:
+        sheetChannel.insert_rows(channel_values, row=2)
+    if video_values:
+        sheetVideo.insert_rows(video_values, row=2)
+
     write_urls(damage_urls)
 
     if count > 0:
         notify(f"Youtube新着{count}件")
 
-    sheetVideo.sort((3, "des"), range="A2:Z10000")
-    gspread.deleteEmptyRows(sheetVideo)
-    sheetChannel.sort((5, "des"), range="A2:Z10000")
-    gspread.deleteEmptyRows(sheetChannel)
+    if video_values:
+        sheetVideo.sort((3, "des"), range="A2:Z10000")
+        gspread.deleteEmptyRows(sheetVideo)
+    if channel_values:
+        sheetChannel.sort((5, "des"), range="A2:Z10000")
+        gspread.deleteEmptyRows(sheetChannel)
 
 
 def write_urls_to_youtube_sheet(urls):
