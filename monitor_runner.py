@@ -82,6 +82,7 @@ def run_stages(
         try:
             child_environment = os.environ.copy()
             child_environment["PRICONNER_MONITOR_LOCK_HELD"] = "1"
+            child_environment["PRICONNER_MONITOR_RUNTIME_DIR"] = str(runtime_dir)
             result = command_runner(
                 command, cwd=root_dir, check=False, env=child_environment
             )

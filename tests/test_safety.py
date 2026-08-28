@@ -27,13 +27,15 @@ class SafetyTests(unittest.TestCase):
                 return False
 
             def extract_info(self, *_args, **_kwargs):
-                return {"channel": "test", "entries": [None]}
+                return {"channel": "test", "entries": [None] * 20}
 
         with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
             channel = youtube_channel.YTDLPChannel("https://example.test/channel")
 
         self.assertTrue(captured["ignoreerrors"])
         self.assertEqual(channel.videos, [])
+        self.assertEqual(captured["playliststart"], 1)
+        self.assertEqual(captured["playlistend"], youtube_channel.DEFAULT_CHANNEL_LIMIT)
 
     def test_parse_stages_removes_duplicate_stage_names(self):
         self.assertEqual(
@@ -64,11 +66,16 @@ class SafetyTests(unittest.TestCase):
             def extract_info(self, *_args, **_kwargs):
                 return {"entries": []}
 
-        with patch.object(youtube_search.gspread, "get_config_value", return_value="9999"), patch.object(
-            youtube_search, "YoutubeDL", FakeYDL
+        with (
+            patch.object(
+                youtube_search.gspread, "get_config_value", return_value="9999"
+            ),
+            patch.object(youtube_search, "YoutubeDL", FakeYDL),
         ):
             self.assertEqual(youtube_search.search_youtube("test"), [])
-        self.assertEqual(FakeYDL.options["playlistend"], youtube_search.MAX_SEARCH_LIMIT)
+        self.assertEqual(
+            FakeYDL.options["playlistend"], youtube_search.MAX_SEARCH_LIMIT
+        )
 
     def test_search_normalizes_timestamp_and_deduplicates_results(self):
         class FakeYDL:
@@ -103,8 +110,9 @@ class SafetyTests(unittest.TestCase):
                 }
 
         now = datetime(2026, 8, 29, tzinfo=timezone.utc)
-        with patch.object(youtube_search.gspread, "get_config_value", return_value="20"), patch.object(
-            youtube_search, "YoutubeDL", FakeYDL
+        with (
+            patch.object(youtube_search.gspread, "get_config_value", return_value="20"),
+            patch.object(youtube_search, "YoutubeDL", FakeYDL),
         ):
             videos = youtube_search.search_youtube("test", now_factory=lambda: now)
 
@@ -117,7 +125,9 @@ class SafetyTests(unittest.TestCase):
             with acquire_lock(lock_path):
                 called = []
                 with patch.dict(os.environ, {}, clear=False):
-                    self.assertEqual(run_locked(lambda: called.append(True), directory), 0)
+                    self.assertEqual(
+                        run_locked(lambda: called.append(True), directory), 0
+                    )
                 self.assertEqual(called, [])
 
     def test_runner_passes_lock_marker_to_children(self):
