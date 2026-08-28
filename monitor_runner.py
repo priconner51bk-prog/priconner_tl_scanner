@@ -137,7 +137,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         stages = parse_stages(args.stages)
-        return run_stages(stages, args.runtime_dir)
+        with acquire_lock(args.runtime_dir / "monitor.lock"):
+            return run_stages(stages, args.runtime_dir)
+    except LockBusy:
+        print("Another monitor run is already in progress; skipping.")
+        return 0
     except ValueError as error:
         print(error, file=sys.stderr)
         return 2
