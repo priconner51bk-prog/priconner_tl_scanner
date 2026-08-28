@@ -30,12 +30,10 @@ def acquire_lock(lock_path):
         yield
 
 
-def run_locked(callback, runtime_dir=None):
-    """Run a standalone stage under the monitor lock unless the runner owns it."""
-    if os.environ.get("PRICONNER_MONITOR_LOCK_HELD") == "1":
-        return callback()
+def run_locked(callback, runtime_dir=None, lock_name="monitor.lock"):
+    """Run a standalone stage under its own non-blocking process lock."""
     try:
-        with acquire_lock(Path(runtime_dir or default_runtime_dir()) / "monitor.lock"):
+        with acquire_lock(Path(runtime_dir or default_runtime_dir()) / lock_name):
             return callback()
     except LockBusy:
         print("Another monitor run is already in progress; skipping.")

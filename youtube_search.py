@@ -22,7 +22,9 @@ class YTDLPVideo:
         video_id = info.get("id")
         if not video_id:
             raise ValueError("YouTube search result has no video id")
-        self.watch_url = info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
+        self.watch_url = (
+            info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
+        )
         self.title = info.get("title", "")
         self.channel_id = info.get("channel_id", "")
         self.channel_url = info.get("channel_url") or (
@@ -44,7 +46,14 @@ class YTDLPVideo:
 
 class YTDLPChannel:
     def __init__(self, url):
-        with YoutubeDL({"quiet": True, "skip_download": True, "extract_flat": True, "remote_components": ["ejs:github"]}) as ydl:
+        with YoutubeDL(
+            {
+                "quiet": True,
+                "skip_download": True,
+                "extract_flat": True,
+                "remote_components": ["ejs:github"],
+            }
+        ) as ydl:
             info = ydl.extract_info(url, download=False)
         self.channel_name = info.get("channel") or info.get("uploader", "")
         self.channel_url = info.get("channel_url") or url
@@ -118,9 +127,7 @@ def findYouTubeVideo(
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     sheetChannelIgnores = [
-        row[3]
-        for row in sheetChannel.get_all_values()
-        if len(row) > 6 and row[6]
+        row[3] for row in sheetChannel.get_all_values() if len(row) > 6 and row[6]
     ]
 
     sheetVideo = ss.worksheet("YouTube動画")
@@ -176,7 +183,9 @@ def findYouTubeVideo(
             channelId = video.channel_id
 
             if channelUrl not in channel_name_cache:
-                channel_name_cache[channelUrl] = channel_factory(channelUrl).channel_name
+                channel_name_cache[channelUrl] = channel_factory(
+                    channelUrl
+                ).channel_name
             channelName = channel_name_cache[channelUrl]
 
             if channelId not in channelIds:
@@ -254,7 +263,7 @@ def main():
         print(f"終了{datetime.nowString()}")
         print("-----------------------------------------------")
 
-    return run_locked(run)
+    return run_locked(run, lock_name="youtube_search.lock")
 
 
 if __name__ == "__main__":

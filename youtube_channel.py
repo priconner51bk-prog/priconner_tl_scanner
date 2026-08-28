@@ -311,7 +311,7 @@ def main():
         print(f"終了{datetime.nowString()}")
         print("-----------------------------------------------")
 
-    return run_locked(run)
+    return run_locked(run, lock_name="youtube_channel.lock")
 
 
 if __name__ == "__main__":

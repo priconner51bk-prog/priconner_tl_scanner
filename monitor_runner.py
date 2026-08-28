@@ -47,7 +47,9 @@ class StateStore:
 
 
 def parse_stages(value):
-    stages = tuple(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+    stages = tuple(
+        dict.fromkeys(item.strip() for item in value.split(",") if item.strip())
+    )
     invalid = [stage for stage in stages if stage not in STAGE_SCRIPTS]
     if invalid:
         raise ValueError(f"Unknown monitor stage: {invalid[0]}")
@@ -81,7 +83,6 @@ def run_stages(
         command = [python_executable, str(Path(root_dir) / STAGE_SCRIPTS[stage])]
         try:
             child_environment = os.environ.copy()
-            child_environment["PRICONNER_MONITOR_LOCK_HELD"] = "1"
             child_environment["PRICONNER_MONITOR_RUNTIME_DIR"] = str(runtime_dir)
             result = command_runner(
                 command, cwd=root_dir, check=False, env=child_environment
@@ -119,7 +120,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         stages = parse_stages(args.stages)
-        with acquire_lock(args.runtime_dir / "monitor.lock"):
+        with acquire_lock(args.runtime_dir / "monitor_runner.lock"):
             return run_stages(stages, args.runtime_dir)
     except LockBusy:
         print("Another monitor run is already in progress; skipping.")

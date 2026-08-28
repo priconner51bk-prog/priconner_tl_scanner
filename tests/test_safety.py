@@ -119,18 +119,23 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(len(videos), 1)
         self.assertEqual(videos[0].publish_date.tzinfo, timezone.utc)
 
-    def test_direct_stage_skips_when_lock_is_held(self):
+    def test_stage_lock_name_can_be_selected(self):
         with tempfile.TemporaryDirectory() as directory:
-            lock_path = Path(directory) / "monitor.lock"
+            lock_path = Path(directory) / "youtube_search.lock"
             with acquire_lock(lock_path):
                 called = []
                 with patch.dict(os.environ, {}, clear=False):
                     self.assertEqual(
-                        run_locked(lambda: called.append(True), directory), 0
+                        run_locked(
+                            lambda: called.append(True),
+                            directory,
+                            "youtube_search.lock",
+                        ),
+                        0,
                     )
                 self.assertEqual(called, [])
 
-    def test_runner_passes_lock_marker_to_children(self):
+    def test_runner_passes_runtime_directory_to_children(self):
         calls = []
 
         def fake_runner(*args, **kwargs):
@@ -145,7 +150,7 @@ class SafetyTests(unittest.TestCase):
                 root_dir=Path.cwd(),
             )
         self.assertEqual(result, 0)
-        self.assertEqual(calls[0][1]["env"]["PRICONNER_MONITOR_LOCK_HELD"], "1")
+        self.assertEqual(calls[0][1]["env"]["PRICONNER_MONITOR_RUNTIME_DIR"], directory)
 
 
 if __name__ == "__main__":
