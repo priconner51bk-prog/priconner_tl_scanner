@@ -8,6 +8,7 @@ import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
 from runtime_utils import run_locked
+from video_relevance import is_relevant_video
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
@@ -26,6 +27,8 @@ class YTDLPVideo:
             info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
         )
         self.title = info.get("title", "")
+        self.description = info.get("description", "")
+        self.tags = info.get("tags", [])
         self.channel_id = info.get("channel_id", "")
         self.channel_url = info.get("channel_url") or (
             f"https://www.youtube.com/channel/{self.channel_id}"
@@ -169,6 +172,10 @@ def findYouTubeVideo(
                 continue
             videoUrl = video.watch_url
             if videoUrl in known_video_urls:
+                continue
+
+            if not is_relevant_video(video, (bossName,)):
+                print("skip: not a likely Princess Connect video")
                 continue
 
             channelUrl = video.channel_url

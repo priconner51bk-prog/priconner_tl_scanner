@@ -8,12 +8,28 @@ from unittest.mock import patch
 
 import monitor_runner
 import sheets_maintenance
+import video_relevance
 import youtube_channel
 import youtube_search
 from runtime_utils import acquire_lock, run_locked
 
 
 class SafetyTests(unittest.TestCase):
+    def test_video_relevance_uses_description_and_rejects_other_games(self):
+        relevant = SimpleNamespace(
+            title="4段階目 TL",
+            description="プリコネ クランバトルの編成と持越し手順",
+            tags=[],
+        )
+        other_game = SimpleNamespace(
+            title="新イベント攻略",
+            description="ブルーアーカイブの攻略動画です",
+            tags=[],
+        )
+        self.assertGreaterEqual(video_relevance.relevance_score(relevant), 4)
+        self.assertTrue(video_relevance.is_relevant_video(relevant))
+        self.assertFalse(video_relevance.is_relevant_video(other_game))
+
     def test_maintenance_marks_old_channels_and_reactivates_recent_ones(self):
         channel_rows = [
             ["header"] * 7,

@@ -12,6 +12,7 @@ import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
 from runtime_utils import default_runtime_dir, run_locked
+from video_relevance import is_relevant_video
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 4
@@ -25,6 +26,8 @@ class YTDLPVideo:
             info.get("webpage_url") or f"https://www.youtube.com/watch?v={info['id']}"
         )
         self.title = info.get("title", "")
+        self.description = info.get("description", "")
+        self.tags = info.get("tags", [])
         upload_date = info.get("upload_date")
         self.publish_date = (
             DateTime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
@@ -162,6 +165,9 @@ def checkNewArrivalsForYouTube(
         write_urls = write_urls_to_youtube_sheet
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheetVideo = ss.worksheet("YouTube動画")
+    boss_names = [
+        row[0] for row in ss.worksheet("ボス名").get_all_values()[1:] if row and row[0]
+    ]
 
     count = 0
     damage_urls = []
@@ -215,6 +221,10 @@ def checkNewArrivalsForYouTube(
                 continue
 
             print(f"videoUrl:{videoUrl}")
+
+            if not is_relevant_video(yt, boss_names):
+                print("skip: not a likely Princess Connect video")
+                continue
 
             if videoUrl in known_video_urls:
                 continue
