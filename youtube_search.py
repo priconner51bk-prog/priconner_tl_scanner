@@ -10,7 +10,7 @@ import gspread_utils as gspread
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
 DEFAULT_PERIOD_DAYS = 7
-DEFAULT_SEARCH_LIMIT = 100
+DEFAULT_SEARCH_LIMIT = 20
 
 
 class YTDLPVideo:
