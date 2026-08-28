@@ -157,8 +157,9 @@ def checkNewArrivalsForWorryChefs(
     if not valid_source_seen:
         return
 
-    save_tl_values(sheet_tl, tl_values)
-    notify_tl_values(notify, last_link_url, tl_values)
+    if tl_values:
+        save_tl_values(sheet_tl, tl_values)
+        notify_tl_values(notify, last_link_url, tl_values)
 
 
 def main():

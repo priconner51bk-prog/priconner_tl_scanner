@@ -46,6 +46,7 @@ def updateYouTubeChannelIdList():
     ss = gspread.getNewArrivalsSheet()
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     rows = sheetChannel.get_all_values()
+    updated = False
     for i, row in enumerate(rows, start=1):
         if i <= 1:
             continue
@@ -75,11 +76,13 @@ def updateYouTubeChannelIdList():
             sheetChannel.cell(i, 2).address,
             value_input_option="USER_ENTERED",
         )
+        updated = True
 
         time.sleep(WAIT_TIME)
 
-    sheetChannel.sort((5, "des"), range="A2:Z10000")
-    gspread.deleteEmptyRows(sheetChannel)
+    if updated:
+        sheetChannel.sort((5, "des"), range="A2:Z10000")
+        gspread.deleteEmptyRows(sheetChannel)
 
 
 def checkNewArrivalsForYouTube(
@@ -193,10 +196,11 @@ def checkNewArrivalsForYouTube(
     if count > 0:
         notify(f"Youtube新着{count}件")
 
-    sheetVideo.sort((3, "des"), range="A2:Z10000")
-    gspread.deleteEmptyRows(sheetVideo)
-    sheetChannel.sort((5, "des"), range="A2:Z10000")
-    gspread.deleteEmptyRows(sheetChannel)
+    if count > 0:
+        sheetVideo.sort((3, "des"), range="A2:Z10000")
+        gspread.deleteEmptyRows(sheetVideo)
+        sheetChannel.sort((5, "des"), range="A2:Z10000")
+        gspread.deleteEmptyRows(sheetChannel)
 
 
 def write_urls_to_youtube_sheet(urls):
