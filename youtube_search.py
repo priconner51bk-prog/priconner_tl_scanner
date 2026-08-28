@@ -116,6 +116,7 @@ def findYouTubeVideo(
     damage_urls = []
     videoUrls = sheetVideo.col_values(5)
     channelIds = sheetChannel.col_values(2)
+    channel_name_cache = {}
 
     for bossName in bossNames:
         print(f"ボス名：{bossName}")
@@ -142,8 +143,9 @@ def findYouTubeVideo(
             publishDate = datetime.dateTime2String(video.publish_date)
             channelId = video.channel_id
 
-            ch = channel_factory(channelUrl)
-            channelName = ch.channel_name
+            if channelUrl not in channel_name_cache:
+                channel_name_cache[channelUrl] = channel_factory(channelUrl).channel_name
+            channelName = channel_name_cache[channelUrl]
 
             if channelId not in channelIds:
                 channelValues = [
