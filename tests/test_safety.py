@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import monitor_runner
+import scheduled_monitor
 import sheets_maintenance
 import video_relevance
 import youtube_channel
@@ -15,6 +16,22 @@ from runtime_utils import acquire_lock, run_locked
 
 
 class SafetyTests(unittest.TestCase):
+    def test_scheduled_monitor_excludes_month_end_and_handles_february(self):
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2025, 2, 20).date()))
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2025, 2, 27).date()))
+        self.assertFalse(scheduled_monitor.is_monitor_day(datetime(2025, 2, 28).date()))
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2024, 2, 21).date()))
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2024, 2, 28).date()))
+        self.assertFalse(scheduled_monitor.is_monitor_day(datetime(2024, 2, 29).date()))
+
+    def test_scheduled_monitor_uses_previous_eight_days_for_30_and_31_day_months(self):
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2026, 10, 23).date()))
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2026, 10, 30).date()))
+        self.assertFalse(scheduled_monitor.is_monitor_day(datetime(2026, 10, 31).date()))
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2026, 4, 22).date()))
+        self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2026, 4, 29).date()))
+        self.assertFalse(scheduled_monitor.is_monitor_day(datetime(2026, 4, 30).date()))
+
     def test_video_relevance_uses_description_and_rejects_other_games(self):
         relevant = SimpleNamespace(
             title="4段階目 TL",

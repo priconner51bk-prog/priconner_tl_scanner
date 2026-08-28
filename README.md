@@ -14,6 +14,18 @@
 python3 monitor_runner.py
 ```
 
+月末の最終日を除く直前8日間だけ定期実行する場合は、ラズパイのcrontabに
+次の1行を登録します。`/path/to/priconner_tl_movie_scanner` は実際の配置先に
+置き換えてください。crontabは毎日呼び出しますが、`scheduled_monitor.py` が
+対象期間以外の処理を自動的にスキップします。
+
+```cron
+0 3 * * * cd /path/to/priconner_tl_movie_scanner && /usr/bin/python3 scheduled_monitor.py >> /path/to/priconner_tl_movie_scanner/monitor.log 2>&1
+```
+
+この判定では、31日ある月は23〜30日、30日ある月は22〜29日、通常年の2月は
+20〜27日、うるう年の2月は21〜28日が対象で、月の最終日は対象外です。
+
 スプレッドシートのチャンネル除外状態を更新する場合:
 
 ```sh
