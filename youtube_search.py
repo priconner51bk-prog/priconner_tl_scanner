@@ -19,16 +19,27 @@ MAX_SEARCH_LIMIT = 50
 class YTDLPVideo:
     def __init__(self, info):
         self._info = info
-        self.watch_url = info.get("webpage_url") or f"https://www.youtube.com/watch?v={info['id']}"
-        self.channel_url = info.get("channel_url") or f"https://www.youtube.com/channel/{info['channel_id']}"
+        video_id = info.get("id")
+        if not video_id:
+            raise ValueError("YouTube search result has no video id")
+        self.watch_url = info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
         self.title = info.get("title", "")
         self.channel_id = info.get("channel_id", "")
-        upload_date = info.get("upload_date")
-        self.publish_date = (
-            DateTime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
-            if upload_date
-            else None
+        self.channel_url = info.get("channel_url") or (
+            f"https://www.youtube.com/channel/{self.channel_id}"
+            if self.channel_id
+            else ""
         )
+        timestamp = info.get("timestamp")
+        if timestamp is not None:
+            self.publish_date = DateTime.fromtimestamp(timestamp, tz=timezone.utc)
+        else:
+            upload_date = info.get("upload_date")
+            self.publish_date = (
+                DateTime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
+                if upload_date
+                else None
+            )
 
 
 class YTDLPChannel:
@@ -39,7 +50,7 @@ class YTDLPChannel:
         self.channel_url = info.get("channel_url") or url
 
 
-def search_youtube(query):
+def search_youtube(query, now_factory=None):
     period_days = int(
         gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
     )
@@ -56,12 +67,23 @@ def search_youtube(query):
     }
     with YoutubeDL(options) as ydl:
         result = ydl.extract_info(f"ytsearch{search_limit}:{query}", download=False)
-    cutoff = DateTime.now(timezone.utc) - timedelta(days=period_days)
-    return [
-        video
-        for video in (YTDLPVideo(entry) for entry in result.get("entries", []) if entry)
-        if video.publish_date is not None and video.publish_date >= cutoff
-    ]
+    now = now_factory() if now_factory else DateTime.now(timezone.utc)
+    cutoff = now - timedelta(days=period_days)
+    videos = []
+    seen_urls = set()
+    for entry in result.get("entries", []):
+        if not entry:
+            continue
+        try:
+            video = YTDLPVideo(entry)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if video.watch_url in seen_urls:
+            continue
+        seen_urls.add(video.watch_url)
+        if video.publish_date is not None and video.publish_date >= cutoff:
+            videos.append(video)
+    return videos
 
 
 def is_recent_video(video, now=None, period_days=None):
@@ -95,12 +117,11 @@ def findYouTubeVideo(
         write_urls = write_urls_to_youtube_sheet
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheetChannel = ss.worksheet("YouTubeチャンネル")
-    sheetChannelIgnores = list(
-        map(
-            lambda x: x[3],
-            filter(lambda x: len(x[6]) > 0, sheetChannel.get_all_values()),
-        )
-    )
+    sheetChannelIgnores = [
+        row[3]
+        for row in sheetChannel.get_all_values()
+        if len(row) > 6 and row[6]
+    ]
 
     sheetVideo = ss.worksheet("YouTube動画")
 
@@ -144,6 +165,9 @@ def findYouTubeVideo(
                 continue
 
             channelUrl = video.channel_url
+            if not channelUrl or not video.channel_id:
+                print("skip: channel information is unavailable")
+                continue
             if channelUrl in sheetChannelIgnores:
                 continue
 

@@ -47,6 +47,47 @@ class SafetyTests(unittest.TestCase):
             self.assertEqual(youtube_search.search_youtube("test"), [])
         self.assertEqual(FakeYDL.options["playlistend"], youtube_search.MAX_SEARCH_LIMIT)
 
+    def test_search_normalizes_timestamp_and_deduplicates_results(self):
+        class FakeYDL:
+            def __init__(self, _options):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, *_args, **_kwargs):
+                return {
+                    "entries": [
+                        {
+                            "id": "abc",
+                            "webpage_url": "https://www.youtube.com/watch?v=abc",
+                            "channel_id": "channel",
+                            "timestamp": 1787961600,
+                            "title": "first",
+                        },
+                        {
+                            "id": "abc",
+                            "webpage_url": "https://www.youtube.com/watch?v=abc",
+                            "channel_id": "channel",
+                            "timestamp": 1787961600,
+                            "title": "duplicate",
+                        },
+                        {"title": "malformed"},
+                    ]
+                }
+
+        now = datetime(2026, 8, 29, tzinfo=timezone.utc)
+        with patch.object(youtube_search.gspread, "get_config_value", return_value="20"), patch.object(
+            youtube_search, "YoutubeDL", FakeYDL
+        ):
+            videos = youtube_search.search_youtube("test", now_factory=lambda: now)
+
+        self.assertEqual(len(videos), 1)
+        self.assertEqual(videos[0].publish_date.tzinfo, timezone.utc)
+
     def test_direct_stage_skips_when_lock_is_held(self):
         with tempfile.TemporaryDirectory() as directory:
             lock_path = Path(directory) / "monitor.lock"
