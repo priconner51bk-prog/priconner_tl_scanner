@@ -7,12 +7,48 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import monitor_runner
+import sheets_maintenance
 import youtube_channel
 import youtube_search
 from runtime_utils import acquire_lock, run_locked
 
 
 class SafetyTests(unittest.TestCase):
+    def test_maintenance_marks_old_channels_and_reactivates_recent_ones(self):
+        channel_rows = [
+            ["header"] * 7,
+            ["", "old", "old", "old-url", "", "", ""],
+            [
+                "",
+                "recent",
+                "recent",
+                "recent-url",
+                "",
+                "",
+                sheets_maintenance.INACTIVE_MARKER,
+            ],
+            ["", "manual", "manual", "manual-url", "", "", "手動除外"],
+            ["", "unknown", "unknown", "unknown-url", "", "", ""],
+        ]
+        video_rows = [
+            ["header"] * 5,
+            ["old", "old-url", "2026/04/01 00:00:00", "", ""],
+            ["recent", "recent-url", "2026/08/01 00:00:00", "", ""],
+            ["manual", "manual-url", "2026/04/01 00:00:00", "", ""],
+        ]
+        flags, changed = sheets_maintenance.calculate_channel_flags(
+            channel_rows,
+            video_rows,
+            now=datetime(2026, 8, 29, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            flags,
+            [[sheets_maintenance.INACTIVE_MARKER], [""], ["手動除外"], [""]],
+        )
+        self.assertEqual(changed[0][0], 2)
+        self.assertEqual(changed[0][2], sheets_maintenance.INACTIVE_MARKER)
+        self.assertEqual(changed[1][0], 3)
+
     def test_channel_extraction_ignores_unavailable_videos(self):
         captured = {}
 

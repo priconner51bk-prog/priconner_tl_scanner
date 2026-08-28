@@ -13,3 +13,11 @@
 ```sh
 python3 monitor_runner.py
 ```
+
+スプレッドシートのチャンネル除外状態を更新する場合:
+
+```sh
+python3 sheets_maintenance.py
+```
+
+`[maintenance] inactive_days` 未満の新しい動画記録があるチャンネルは、自動除外印が解除されます。動画記録がないチャンネルや手動設定の除外印は変更しません。

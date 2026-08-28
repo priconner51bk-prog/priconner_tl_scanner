@@ -14,3 +14,6 @@ search_limit=20
 runtime_dir=
 stages=youtube-channel,youtube-search,worrychefs
 python=python3
+
+[maintenance]
+inactive_days=90
