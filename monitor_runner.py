@@ -1,15 +1,15 @@
 """Run the scheduled monitoring stages and persist non-secret runtime state."""
 
 import argparse
-import fcntl
 import json
 import os
 import subprocess
 import sys
 import tempfile
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+
+from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_STAGES = ("youtube-channel", "youtube-search", "worrychefs")
@@ -18,22 +18,6 @@ STAGE_SCRIPTS = {
     "youtube-search": "youtube_search.py",
     "worrychefs": "worrychefs.py",
 }
-
-
-class LockBusy(Exception):
-    """Raised when another local monitor process owns the lock."""
-
-
-@contextmanager
-def acquire_lock(lock_path):
-    lock_path = Path(lock_path)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("w") as lock_file:
-        try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise LockBusy from error
-        yield
 
 
 class StateStore:
@@ -63,7 +47,7 @@ class StateStore:
 
 
 def parse_stages(value):
-    stages = tuple(item.strip() for item in value.split(",") if item.strip())
+    stages = tuple(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
     invalid = [stage for stage in stages if stage not in STAGE_SCRIPTS]
     if invalid:
         raise ValueError(f"Unknown monitor stage: {invalid[0]}")
@@ -96,7 +80,11 @@ def run_stages(
         store.update(status="running", stage=stage, failure_stage=None)
         command = [python_executable, str(Path(root_dir) / STAGE_SCRIPTS[stage])]
         try:
-            result = command_runner(command, cwd=root_dir, check=False)
+            child_environment = os.environ.copy()
+            child_environment["PRICONNER_MONITOR_LOCK_HELD"] = "1"
+            result = command_runner(
+                command, cwd=root_dir, check=False, env=child_environment
+            )
             exit_code = result.returncode
         except OSError:
             exit_code = 127
@@ -118,13 +106,6 @@ def run_stages(
         exit_code=0,
     )
     return 0
-
-
-def default_runtime_dir():
-    state_home = os.environ.get("XDG_STATE_HOME")
-    if state_home:
-        return Path(state_home) / "priconner-tl-new-arrivals"
-    return Path.home() / ".local" / "state" / "priconner-tl-new-arrivals"
 
 
 def main(argv=None):

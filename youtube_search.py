@@ -1,16 +1,19 @@
 import time
-from datetime import datetime as DateTime, timedelta, timezone
+from datetime import datetime as DateTime
+from datetime import timedelta, timezone
 
 from yt_dlp import YoutubeDL
 
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
+from runtime_utils import run_locked
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
 DEFAULT_PERIOD_DAYS = 7
 DEFAULT_SEARCH_LIMIT = 20
+MAX_SEARCH_LIMIT = 50
 
 
 class YTDLPVideo:
@@ -43,6 +46,7 @@ def search_youtube(query):
     search_limit = int(
         gspread.get_config_value("youtube", "search_limit", DEFAULT_SEARCH_LIMIT)
     )
+    search_limit = max(1, min(search_limit, MAX_SEARCH_LIMIT))
     options = {
         "quiet": True,
         "skip_download": True,
@@ -72,7 +76,7 @@ def is_recent_video(video, now=None, period_days=None):
         return False
     if publish_date.tzinfo is None:
         publish_date = publish_date.replace(tzinfo=timezone.utc)
-    return publish_date >= now - timedelta(days=7)
+    return publish_date >= now - timedelta(days=period_days)
 
 
 def findYouTubeVideo(
@@ -115,7 +119,11 @@ def findYouTubeVideo(
     count = 0
     damage_urls = []
     videoUrls = sheetVideo.col_values(5)
+    known_video_urls = set(videoUrls)
     channelIds = sheetChannel.col_values(2)
+    period_days = int(
+        gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
+    )
     channel_name_cache = {}
     channel_values = []
     video_values = []
@@ -129,12 +137,10 @@ def findYouTubeVideo(
 
         videos = search.videos if hasattr(search, "videos") else search
         for video in videos:
-            if not is_recent_video(video, period_days=int(
-                gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
-            )):
+            if not is_recent_video(video, period_days=period_days):
                 continue
             videoUrl = video.watch_url
-            if videoUrl in videoUrls:
+            if videoUrl in known_video_urls:
                 continue
 
             channelUrl = video.channel_url
@@ -168,6 +174,7 @@ def findYouTubeVideo(
             )
             print(video_values[-1:])
             videoUrls.append(videoUrl)
+            known_video_urls.add(videoUrl)
 
             count += 1
             damage_urls.append(videoUrl)
@@ -202,6 +209,7 @@ def write_urls_to_youtube_sheet(urls):
     """
     if isinstance(urls, str):
         urls = [urls]
+    urls = list(dict.fromkeys(url for url in urls if url))
     if not urls:
         return
 
@@ -213,13 +221,16 @@ def write_urls_to_youtube_sheet(urls):
 
 
 def main():
-    print("-----------------------------------------------")
-    print(f"開始{datetime.nowString()}")
-    print("-----------------------------------------------")
-    findYouTubeVideo()
-    print("-----------------------------------------------")
-    print(f"終了{datetime.nowString()}")
-    print("-----------------------------------------------")
+    def run():
+        print("-----------------------------------------------")
+        print(f"開始{datetime.nowString()}")
+        print("-----------------------------------------------")
+        findYouTubeVideo()
+        print("-----------------------------------------------")
+        print(f"終了{datetime.nowString()}")
+        print("-----------------------------------------------")
+
+    return run_locked(run)
 
 
 if __name__ == "__main__":

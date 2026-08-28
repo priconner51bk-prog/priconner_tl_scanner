@@ -1,15 +1,18 @@
 import time
-from datetime import datetime as DateTime, timezone
+from datetime import datetime as DateTime
+from datetime import timezone
 
 from yt_dlp import YoutubeDL
 
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
+from runtime_utils import run_locked
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 4
 DEFAULT_PERIOD_DAYS = 7
+DEFAULT_CHANNEL_LIMIT = 20
 
 
 class YTDLPVideo:
@@ -32,6 +35,7 @@ class YTDLPChannel:
             "skip_download": True,
             "extract_flat": False,
             "remote_components": ["ejs:github"],
+            "playlistend": DEFAULT_CHANNEL_LIMIT,
         }
         with YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -63,7 +67,8 @@ def updateYouTubeChannelIdList():
             with YoutubeDL({"quiet": True, "skip_download": True, "extract_flat": True, "remote_components": ["ejs:github"]}) as ydl:
                 video_info = ydl.extract_info(videoUrl, download=False)
             channelId = video_info.get("channel_id", "")
-            channelId = yt.channel_id
+            if not channelId:
+                continue
 
         url = f"{URL_YOUTUBE_CHANNEL}{channelId}"
         ch = YTDLPChannel(url)
@@ -107,6 +112,7 @@ def checkNewArrivalsForYouTube(
 
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     videoUrls = sheetVideo.col_values(5)
+    known_video_urls = set(videoUrls)
     rows = sheetChannel.get_all_values()
     for i, row in enumerate(rows, start=1):
         if i <= 1:
@@ -147,7 +153,7 @@ def checkNewArrivalsForYouTube(
 
             print(f"videoUrl:{videoUrl}")
 
-            if videoUrl in videoUrls:
+            if videoUrl in known_video_urls:
                 continue
 
             publishDate = yt.publish_date
@@ -173,6 +179,7 @@ def checkNewArrivalsForYouTube(
             print(f"YouTube動画タイトル「{yt.title}」")
             videoValues.append(values)
             videoUrls.append(videoUrl)
+            known_video_urls.add(videoUrl)
 
             count += 1
             damage_urls.append(videoUrl)
@@ -211,6 +218,7 @@ def write_urls_to_youtube_sheet(urls):
     """
     if isinstance(urls, str):
         urls = [urls]
+    urls = list(dict.fromkeys(url for url in urls if url))
     if not urls:
         return
 
@@ -222,14 +230,17 @@ def write_urls_to_youtube_sheet(urls):
 
 
 def main():
-    print("-----------------------------------------------")
-    print(f"開始{datetime.nowString()}")
-    print("-----------------------------------------------")
-    updateYouTubeChannelIdList()
-    checkNewArrivalsForYouTube()
-    print("-----------------------------------------------")
-    print(f"終了{datetime.nowString()}")
-    print("-----------------------------------------------")
+    def run():
+        print("-----------------------------------------------")
+        print(f"開始{datetime.nowString()}")
+        print("-----------------------------------------------")
+        updateYouTubeChannelIdList()
+        checkNewArrivalsForYouTube()
+        print("-----------------------------------------------")
+        print(f"終了{datetime.nowString()}")
+        print("-----------------------------------------------")
+
+    return run_locked(run)
 
 
 if __name__ == "__main__":

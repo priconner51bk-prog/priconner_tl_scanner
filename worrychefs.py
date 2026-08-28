@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
+from runtime_utils import run_locked
 
 
 def normalize_damage(value):
@@ -163,15 +164,18 @@ def checkNewArrivalsForWorryChefs(
 
 
 def main():
-    print("-----------------------------------------------")
-    print(f"開始{datetime.nowString()}")
-    print("-----------------------------------------------")
+    def run():
+        print("-----------------------------------------------")
+        print(f"開始{datetime.nowString()}")
+        print("-----------------------------------------------")
 
-    checkNewArrivalsForWorryChefs()
+        checkNewArrivalsForWorryChefs()
 
-    print("-----------------------------------------------")
-    print(f"終了{datetime.nowString()}")
-    print("-----------------------------------------------")
+        print("-----------------------------------------------")
+        print(f"終了{datetime.nowString()}")
+        print("-----------------------------------------------")
+
+    return run_locked(run)
 
 
 if __name__ == "__main__":
