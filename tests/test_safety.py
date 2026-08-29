@@ -106,6 +106,94 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(captured["playliststart"], 1)
         self.assertEqual(captured["playlistend"], youtube_channel.DEFAULT_CHANNEL_LIMIT)
 
+    def test_channel_listing_uses_fast_uploads_feed(self):
+        captured = {}
+
+        class FakeYDL:
+            def __init__(self, options):
+                captured.update(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, **_kwargs):
+                captured["url"] = url
+                return {"channel": "test", "entries": []}
+
+        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
+            youtube_channel.YTDLPChannel("https://example.test/channel/")
+
+        self.assertEqual(captured["url"], "https://example.test/channel/videos")
+        self.assertTrue(captured["extract_flat"])
+
+    def test_registered_channel_accepts_video_without_relevance_terms(self):
+        class FakeSheet:
+            def __init__(self, rows):
+                self.rows = rows
+                self.updated = []
+                self.inserted = []
+
+            def get_all_values(self):
+                return self.rows
+
+            def col_values(self, column):
+                return [row[column - 1] for row in self.rows]
+
+            def update(self, values, *_args, **_kwargs):
+                self.updated.append(values)
+
+            def insert_rows(self, values, **_kwargs):
+                self.inserted.extend(values)
+
+            def cell(self, row, column):
+                return SimpleNamespace(address=f"{chr(64 + column)}{row}")
+
+            def sort(self, *_args, **_kwargs):
+                pass
+
+        now = datetime(2026, 8, 29, tzinfo=timezone.utc)
+        video = SimpleNamespace(
+            watch_url="https://www.youtube.com/watch?v=new",
+            title="雑談だけのタイトル",
+            publish_date=now - timedelta(hours=1),
+        )
+
+        class FakeChannel:
+            videos = [video]
+            entry_count = 1
+
+        channel_sheet = FakeSheet(
+            [["h"] * 7, ["", "channel", "name", "url", "", "", ""]]
+        )
+        video_sheet = FakeSheet([["h"] * 5])
+        boss_sheet = FakeSheet([["h"]])
+        spreadsheet = SimpleNamespace(
+            worksheet=lambda name: {
+                "YouTubeチャンネル": channel_sheet,
+                "YouTube動画": video_sheet,
+                "ボス名": boss_sheet,
+            }[name]
+        )
+
+        with patch.object(
+            youtube_channel.gspread, "get_config_value", return_value="7"
+        ):
+            youtube_channel.checkNewArrivalsForYouTube(
+                spreadsheet=spreadsheet,
+                channel_factory=lambda *_args, **_kwargs: FakeChannel(),
+                post=lambda *_args: None,
+                notify=lambda *_args: None,
+                write_urls=lambda *_args: None,
+                sleep=lambda *_args: None,
+                now_factory=lambda: now,
+            )
+
+        self.assertEqual(len(video_sheet.inserted), 1)
+        self.assertEqual(video_sheet.inserted[0][4], video.watch_url)
+
     def test_parse_stages_removes_duplicate_stage_names(self):
         self.assertEqual(
             monitor_runner.parse_stages("youtube-search,youtube-search,worrychefs"),

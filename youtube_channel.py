@@ -1,99 +1,84 @@
 import time
-import json
-import os
-import tempfile
 from datetime import datetime as DateTime
 from datetime import timezone
-from pathlib import Path
 
 from yt_dlp import YoutubeDL
 
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
-from runtime_utils import default_runtime_dir, run_locked
-from video_relevance import is_relevant_video
+from runtime_utils import run_locked
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
-WAIT_TIME = 4
+# Network calls are already rate limited by YouTube/Discord.  A four second
+# delay per channel made a normal scan take several minutes.
+WAIT_TIME = 0
 DEFAULT_PERIOD_DAYS = 7
-DEFAULT_CHANNEL_LIMIT = 20
+# A larger first page prevents busy channels from hiding a week's uploads,
+# while flat extraction keeps this cheaper than 20 detailed video requests.
+DEFAULT_CHANNEL_LIMIT = 50
 
 
 class YTDLPVideo:
     def __init__(self, info):
+        if not info or not info.get("id"):
+            raise ValueError("YouTube channel entry has no video id")
+        self.video_id = info["id"]
         self.watch_url = (
-            info.get("webpage_url") or f"https://www.youtube.com/watch?v={info['id']}"
+            info.get("webpage_url")
+            or f"https://www.youtube.com/watch?v={self.video_id}"
         )
         self.title = info.get("title", "")
         self.description = info.get("description", "")
         self.tags = info.get("tags", [])
         upload_date = info.get("upload_date")
-        self.publish_date = (
-            DateTime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
-            if upload_date
-            else None
-        )
+        timestamp = info.get("timestamp")
+        if timestamp is not None:
+            self.publish_date = DateTime.fromtimestamp(timestamp, tz=timezone.utc)
+        elif upload_date:
+            try:
+                self.publish_date = DateTime.strptime(upload_date, "%Y%m%d").replace(
+                    tzinfo=timezone.utc
+                )
+            except (TypeError, ValueError):
+                self.publish_date = None
+        else:
+            self.publish_date = None
         self.channel_id = info.get("channel_id", "")
+        self.channel_url = info.get("channel_url", "")
 
 
 class YTDLPChannel:
     def __init__(self, url, playlist_start=1):
+        # The channel landing page is not guaranteed to be the uploads feed.
+        # Explicitly selecting /videos also avoids Shorts/live/playlists being
+        # mixed into the first page on some channel layouts.
+        videos_url = url.rstrip("/") + "/videos"
         options = {
             "quiet": True,
             "skip_download": True,
-            "extract_flat": False,
+            # Listing entries is substantially faster and is enough here: a
+            # managed channel is itself the user's inclusion decision.
+            "extract_flat": True,
             "ignoreerrors": True,
             "remote_components": ["ejs:github"],
             "playlistend": playlist_start + DEFAULT_CHANNEL_LIMIT - 1,
             "playliststart": playlist_start,
         }
         with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(videos_url, download=False) or {}
         self.channel_name = info.get("channel") or info.get("uploader", "")
         self.channel_url = info.get("channel_url") or url
         entries = info.get("entries", [])
         self.entry_count = len(entries)
-        self.videos = [
-            YTDLPVideo(entry) for entry in entries if entry and entry.get("id")
-        ]
-
-
-def _cursor_path():
-    runtime_dir = os.environ.get("PRICONNER_MONITOR_RUNTIME_DIR")
-    return (
-        Path(runtime_dir) / "youtube-channel-cursors.json"
-        if runtime_dir
-        else default_runtime_dir() / "youtube-channel-cursors.json"
-    )
-
-
-def _load_cursors():
-    path = _cursor_path()
-    try:
-        with path.open(encoding="utf-8") as cursor_file:
-            cursors = json.load(cursor_file)
-        return cursors if isinstance(cursors, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
-def _save_cursors(cursors):
-    path = _cursor_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_path = tempfile.mkstemp(
-        prefix=f".{path.name}.", dir=path.parent
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as cursor_file:
-            json.dump(cursors, cursor_file, ensure_ascii=False, sort_keys=True)
-            cursor_file.write("\n")
-            cursor_file.flush()
-            os.fsync(cursor_file.fileno())
-        os.replace(temporary_path, path)
-    finally:
-        if os.path.exists(temporary_path):
-            os.unlink(temporary_path)
+        self.videos = []
+        for entry in entries:
+            try:
+                self.videos.append(YTDLPVideo(entry))
+            except (TypeError, ValueError):
+                # A deleted/private video can appear as a null entry. It must
+                # not prevent the rest of the channel from being scanned.
+                continue
 
 
 def updateYouTubeChannelIdList():
@@ -165,18 +150,18 @@ def checkNewArrivalsForYouTube(
         write_urls = write_urls_to_youtube_sheet
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheetVideo = ss.worksheet("YouTube動画")
-    boss_names = [
-        row[0] for row in ss.worksheet("ボス名").get_all_values()[1:] if row and row[0]
-    ]
-
     count = 0
     damage_urls = []
 
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     videoUrls = sheetVideo.col_values(5)
     known_video_urls = set(videoUrls)
-    cursors = _load_cursors()
     rows = sheetChannel.get_all_values()
+    period_days = int(
+        gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
+    )
+    now = now_factory()
+    lasted_scan_time = datetime.calcDate(now, period_days)
     for i, row in enumerate(rows, start=1):
         if i <= 1:
             continue
@@ -184,34 +169,20 @@ def checkNewArrivalsForYouTube(
         channelId = row[1]
         if len(channelId) == 0:
             continue
-        ignore = row[6]
+        ignore = row[6] if len(row) > 6 else ""
         if len(ignore) > 0:
             continue
 
         channelName = row[2]
         print(f"YouTubeチャンネル名「{channelName}」")
         channelUrl = row[3]
-        publishDateString = row[4]
-        dateTimeStr = row[5]
-        now = now_factory()
+        publishDateString = row[4] if len(row) > 4 else ""
         nowScanTime = datetime.dateTime2String(now)
-        period_days = int(
-            gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
-        )
-        lastedScanTime = datetime.calcDate(now, period_days)
-        if len(dateTimeStr) > 0:
-            lastedScanTime = datetime.string2DateTime(dateTimeStr)
 
         videoValues = []
         channelUrl = f"{URL_YOUTUBE_CHANNEL}{channelId}"
         print(f"channelUrl:{channelUrl}")
-        playlist_start = max(1, int(cursors.get(channelId, 1)))
-        if playlist_start > 1:
-            # Continuation pages may contain videos published before the last
-            # scan started; the configured lookback is the relevant boundary.
-            lastedScanTime = datetime.calcDate(now, period_days)
-        ch = channel_factory(channelUrl, playlist_start=playlist_start)
-        reached_scan_boundary = False
+        ch = channel_factory(channelUrl, playlist_start=1)
 
         for yt in ch.videos:
             try:
@@ -222,20 +193,21 @@ def checkNewArrivalsForYouTube(
 
             print(f"videoUrl:{videoUrl}")
 
-            if not is_relevant_video(yt, boss_names):
-                print("skip: not a likely Princess Connect video")
-                continue
-
             if videoUrl in known_video_urls:
-                continue
+                # Entries are newest first. Once a known entry is reached,
+                # older entries cannot produce a new result.
+                break
 
             publishDate = yt.publish_date
             if publishDate is None:
-                print("skip: upload date is unavailable")
-                continue
+                # Flat playlist entries occasionally omit upload_date. Since
+                # this is a managed channel and the entry is before the first
+                # known video, keeping it is safer than silently losing a new
+                # upload. The next run deduplicates it by URL.
+                print("upload date unavailable; keeping entry")
+                publishDate = now
 
-            if publishDate <= lastedScanTime:
-                reached_scan_boundary = True
+            if publishDate <= lasted_scan_time:
                 break
 
             if len(publishDateString) == 0 or publishDate > datetime.string2DateTime(
@@ -246,7 +218,7 @@ def checkNewArrivalsForYouTube(
             values = [
                 channelName,
                 channelUrl,
-                publishDateString,
+                datetime.dateTime2String(publishDate),
                 yt.title,
                 videoUrl,
             ]
@@ -260,11 +232,6 @@ def checkNewArrivalsForYouTube(
             post(videoUrl)
             sleep(wait_time)
 
-        if reached_scan_boundary or ch.entry_count < DEFAULT_CHANNEL_LIMIT:
-            cursors.pop(channelId, None)
-        else:
-            cursors[channelId] = playlist_start + DEFAULT_CHANNEL_LIMIT
-
         if len(videoValues) > 0:
             sheetVideo.insert_rows(videoValues, row=2)
 
@@ -276,8 +243,6 @@ def checkNewArrivalsForYouTube(
         )
 
         sleep(wait_time)
-
-    _save_cursors(cursors)
 
     write_urls(damage_urls)
 
