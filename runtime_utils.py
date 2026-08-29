@@ -1,9 +1,14 @@
 """Shared runtime helpers for safe monitor execution."""
 
-import fcntl
 import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 
 class LockBusy(Exception):
@@ -22,12 +27,43 @@ def acquire_lock(lock_path):
     """Acquire a non-blocking process lock and release it on every exit path."""
     lock_path = Path(lock_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("w") as lock_file:
+    try:
+        lock_file = lock_path.open("w")
+    except OSError as error:
+        # Windows may reject a second open of an already locked file before
+        # msvcrt.locking() gets a chance to report the contention.
+        raise LockBusy from error
+
+    locked = False
+    try:
         try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
+            if sys.platform == "win32":
+                # msvcrt.locking() locks a byte range and requires at least
+                # one byte to exist in the file.
+                lock_file.write("0")
+                lock_file.flush()
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except (BlockingIOError, OSError) as error:
             raise LockBusy from error
-        yield
+        try:
+            yield
+        finally:
+            if locked and sys.platform == "win32":
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            elif locked:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        try:
+            lock_file.close()
+        except OSError:
+            # A contended Windows handle can reject close() after the failed
+            # non-blocking lock attempt; the OS releases it with the process.
+            pass
 
 
 def run_locked(callback, runtime_dir=None, lock_name="monitor.lock"):

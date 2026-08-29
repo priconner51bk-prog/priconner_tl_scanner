@@ -14,9 +14,9 @@ URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # delay per channel made a normal scan take several minutes.
 WAIT_TIME = 0
 DEFAULT_PERIOD_DAYS = 7
-# A larger first page prevents busy channels from hiding a week's uploads,
-# while flat extraction keeps this cheaper than 20 detailed video requests.
-DEFAULT_CHANNEL_LIMIT = 50
+# A bounded page keeps scans predictable, while flat extraction avoids
+# detailed video requests for every listed entry.
+DEFAULT_CHANNEL_LIMIT = 20
 
 
 class YTDLPVideo:
@@ -31,8 +31,8 @@ class YTDLPVideo:
         self.title = info.get("title", "")
         self.description = info.get("description", "")
         self.tags = info.get("tags", [])
-        upload_date = info.get("upload_date")
         timestamp = info.get("timestamp")
+        upload_date = info.get("upload_date")
         if timestamp is not None:
             self.publish_date = DateTime.fromtimestamp(timestamp, tz=timezone.utc)
         elif upload_date:
@@ -54,6 +54,7 @@ class YTDLPChannel:
         # Explicitly selecting /videos also avoids Shorts/live/playlists being
         # mixed into the first page on some channel layouts.
         videos_url = url.rstrip("/") + "/videos"
+        playlist_end = playlist_start + DEFAULT_CHANNEL_LIMIT - 1
         options = {
             "quiet": True,
             "skip_download": True,
@@ -62,7 +63,12 @@ class YTDLPChannel:
             "extract_flat": True,
             "ignoreerrors": True,
             "remote_components": ["ejs:github"],
-            "playlistend": playlist_start + DEFAULT_CHANNEL_LIMIT - 1,
+            # playlist_items is intentional in addition to start/end.  Some
+            # YouTube channel extractors fetch a larger continuation page and
+            # only apply playliststart/playlistend after extraction.  The
+            # explicit selector keeps the work bounded to exactly one page.
+            "playlist_items": f"{playlist_start}-{playlist_end}",
+            "playlistend": playlist_end,
             "playliststart": playlist_start,
         }
         with YoutubeDL(options) as ydl:
