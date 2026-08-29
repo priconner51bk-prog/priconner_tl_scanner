@@ -105,6 +105,37 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(channel.videos, [])
         self.assertEqual(captured["playliststart"], 1)
         self.assertEqual(captured["playlistend"], youtube_channel.DEFAULT_CHANNEL_LIMIT)
+        self.assertEqual(captured["playlist_items"], "1-20")
+
+    def test_channel_extraction_requests_each_page_as_a_flat_20_item_slice(self):
+        captured = {}
+
+        class FakeYDL:
+            def __init__(self, options):
+                captured.update(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, *_args, **_kwargs):
+                return {"channel": "test", "entries": []}
+
+        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
+            youtube_channel.YTDLPChannel("https://example.test/channel", playlist_start=21)
+
+        self.assertTrue(captured["extract_flat"])
+        self.assertEqual(captured["playlist_items"], "21-40")
+        self.assertEqual(captured["playliststart"], 21)
+        self.assertEqual(captured["playlistend"], 40)
+
+    def test_channel_video_uses_flat_entry_timestamp(self):
+        video = youtube_channel.YTDLPVideo(
+            {"id": "abc", "timestamp": 1787961600, "title": "test"}
+        )
+        self.assertEqual(video.publish_date.tzinfo, timezone.utc)
 
     def test_parse_stages_removes_duplicate_stage_names(self):
         self.assertEqual(

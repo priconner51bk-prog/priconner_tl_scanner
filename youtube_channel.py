@@ -28,24 +28,39 @@ class YTDLPVideo:
         self.title = info.get("title", "")
         self.description = info.get("description", "")
         self.tags = info.get("tags", [])
+        timestamp = info.get("timestamp")
         upload_date = info.get("upload_date")
-        self.publish_date = (
-            DateTime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
-            if upload_date
-            else None
-        )
+        if timestamp is not None:
+            self.publish_date = DateTime.fromtimestamp(timestamp, tz=timezone.utc)
+        else:
+            self.publish_date = (
+                DateTime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
+                if upload_date
+                else None
+            )
         self.channel_id = info.get("channel_id", "")
 
 
 class YTDLPChannel:
     def __init__(self, url, playlist_start=1):
+        playlist_end = playlist_start + DEFAULT_CHANNEL_LIMIT - 1
         options = {
             "quiet": True,
             "skip_download": True,
-            "extract_flat": False,
+            # A channel URL is a playlist.  Resolving every video in the
+            # playlist here makes yt-dlp perform a full video extraction for
+            # each item before the caller can apply its date/duplicate
+            # checks.  The channel scan only needs the playlist entries; the
+            # title and date are already present in flat entries on YouTube.
+            "extract_flat": True,
             "ignoreerrors": True,
             "remote_components": ["ejs:github"],
-            "playlistend": playlist_start + DEFAULT_CHANNEL_LIMIT - 1,
+            # playlist_items is intentional in addition to start/end.  Some
+            # YouTube channel extractors fetch a larger continuation page and
+            # only apply playliststart/playlistend after extraction.  The
+            # explicit selector keeps the work bounded to exactly one page.
+            "playlist_items": f"{playlist_start}-{playlist_end}",
+            "playlistend": playlist_end,
             "playliststart": playlist_start,
         }
         with YoutubeDL(options) as ydl:
