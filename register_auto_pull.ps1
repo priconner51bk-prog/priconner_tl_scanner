@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot ".")).Path
-$python = (Get-Command python -ErrorAction Stop).Source
+$python = (Get-Command pythonw -ErrorAction Stop).Source
 $taskName = "PriconnerTlMovieScanner-GitPull"
 $scriptPath = Join-Path $repo "auto_pull.py"
 
