@@ -15,13 +15,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 
 
 def run_git(*args, git_runner=subprocess.run):
-    return git_runner(
-        ["git", *args],
-        cwd=ROOT_DIR,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    return git_runner(["git", *args], cwd=ROOT_DIR, check=False, capture_output=True, text=True)
 
 
 def current_branch(git_runner=subprocess.run):
@@ -40,12 +34,10 @@ def update_checkout(git_runner=subprocess.run, branch=None):
     if status.stdout:
         print("Skipping GitHub update: local changes are present.")
         return 0
-
     fetched = run_git("fetch", "--prune", "origin", branch, git_runner=git_runner)
     if fetched.returncode != 0:
         print(fetched.stderr.strip() or "git fetch failed", file=sys.stderr)
         return fetched.returncode or 1
-
     remote_ref = f"origin/{branch}"
     behind = run_git("rev-list", "--count", f"HEAD..{remote_ref}", git_runner=git_runner)
     if behind.returncode != 0:
@@ -55,7 +47,6 @@ def update_checkout(git_runner=subprocess.run, branch=None):
     if count == 0:
         print(f"Already up to date with {remote_ref}.")
         return 0
-
     pulled = run_git("merge", "--ff-only", remote_ref, git_runner=git_runner)
     if pulled.returncode != 0:
         print(pulled.stderr.strip() or "Fast-forward update failed", file=sys.stderr)
