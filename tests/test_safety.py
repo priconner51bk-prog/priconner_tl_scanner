@@ -12,10 +12,45 @@ import sheets_maintenance
 import video_relevance
 import youtube_channel
 import youtube_search
+import boss_names_sync
 from runtime_utils import acquire_lock, run_locked
 
 
 class SafetyTests(unittest.TestCase):
+    def test_monthly_boss_name_rotation(self):
+        self.assertEqual(boss_names_sync.boss_name_for_month(1), "アクアリオス")
+        self.assertEqual(boss_names_sync.boss_name_for_month(8), "メデューサ")
+        self.assertEqual(boss_names_sync.boss_name_for_month(12), "アルゲティ")
+
+    def test_boss_sync_does_not_write_before_source_is_ready(self):
+        sheet = SimpleNamespace(update=unittest.mock.Mock())
+        spreadsheet = SimpleNamespace(worksheet=lambda _name: sheet)
+        self.assertFalse(
+            boss_names_sync.sync_boss_names(
+                spreadsheet=spreadsheet,
+                now=datetime(2026, 8, 23),
+                fetch=lambda: "master data without this month's boss",
+                latest_commit=lambda: datetime(2026, 8, 23, 2, 59, tzinfo=timezone.utc),
+            )
+        )
+        sheet.update.assert_not_called()
+
+    def test_boss_sync_writes_fixed_list_when_source_is_ready(self):
+        sheet = SimpleNamespace(update=unittest.mock.Mock())
+        spreadsheet = SimpleNamespace(worksheet=lambda _name: sheet)
+        self.assertTrue(
+            boss_names_sync.sync_boss_names(
+                spreadsheet=spreadsheet,
+                now=datetime(2026, 8, 23),
+                fetch=lambda: "...メデューサ...",
+                latest_commit=lambda: datetime(2026, 8, 23, 3, 14, tzinfo=timezone.utc),
+            )
+        )
+        sheet.update.assert_called_once()
+        values, range_name = sheet.update.call_args.args[:2]
+        self.assertEqual(range_name, "A2:A13")
+        self.assertEqual(len(values), 12)
+
     def test_scheduled_monitor_excludes_month_end_and_handles_february(self):
         self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2025, 2, 20).date()))
         self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2025, 2, 27).date()))
@@ -220,6 +255,60 @@ class SafetyTests(unittest.TestCase):
                 write_urls=lambda *_args: None,
                 sleep=lambda *_args: None,
                 now_factory=lambda: now,
+            )
+
+        self.assertEqual(len(video_sheet.inserted), 1)
+        self.assertEqual(video_sheet.inserted[0][4], video.watch_url)
+
+    def test_registered_channel_normalizes_naive_publish_datetime(self):
+        class FakeSheet:
+            def __init__(self, rows):
+                self.rows = rows
+                self.inserted = []
+
+            def get_all_values(self):
+                return self.rows
+
+            def col_values(self, column):
+                return [row[column - 1] for row in self.rows]
+
+            def insert_rows(self, values, **_kwargs):
+                self.inserted.extend(values)
+
+            def update(self, *_args, **_kwargs):
+                pass
+
+            def cell(self, row, column):
+                return SimpleNamespace(address=f"{chr(64 + column)}{row}")
+
+            def sort(self, *_args, **_kwargs):
+                pass
+
+        video = SimpleNamespace(
+            watch_url="https://www.youtube.com/watch?v=naive",
+            title="naive date",
+            publish_date=datetime(2026, 8, 29, 11, 0),
+        )
+        channel_sheet = FakeSheet([["h"] * 7, ["", "channel", "name", "url", "", "", ""]])
+        video_sheet = FakeSheet([["h"] * 5])
+        spreadsheet = SimpleNamespace(
+            worksheet=lambda name: {
+                "YouTubeチャンネル": channel_sheet,
+                "YouTube動画": video_sheet,
+            }[name]
+        )
+
+        with patch.object(youtube_channel.gspread, "get_config_value", return_value="7"):
+            youtube_channel.checkNewArrivalsForYouTube(
+                spreadsheet=spreadsheet,
+                channel_factory=lambda *_args, **_kwargs: SimpleNamespace(
+                    videos=[video], entry_count=1
+                ),
+                post=lambda *_args: None,
+                notify=lambda *_args: None,
+                write_urls=lambda *_args: None,
+                sleep=lambda *_args: None,
+                now_factory=lambda: datetime(2026, 8, 29, 12, 0),
             )
 
         self.assertEqual(len(video_sheet.inserted), 1)

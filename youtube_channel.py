@@ -19,6 +19,15 @@ DEFAULT_PERIOD_DAYS = 7
 DEFAULT_CHANNEL_LIMIT = 20
 
 
+def _as_utc(value):
+    """Return a datetime that can safely be compared with UTC timestamps."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        # Keep the existing application convention for naive local times;
+        # astimezone() resolves them using the machine's local timezone.
+        return value.astimezone(timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class YTDLPVideo:
     def __init__(self, info):
         if not info or not info.get("id"):
@@ -166,7 +175,7 @@ def checkNewArrivalsForYouTube(
     period_days = int(
         gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
     )
-    now = now_factory()
+    now = _as_utc(now_factory())
     lasted_scan_time = datetime.calcDate(now, period_days)
     for i, row in enumerate(rows, start=1):
         if i <= 1:
@@ -212,6 +221,8 @@ def checkNewArrivalsForYouTube(
                 # upload. The next run deduplicates it by URL.
                 print("upload date unavailable; keeping entry")
                 publishDate = now
+            else:
+                publishDate = _as_utc(publishDate)
 
             if publishDate <= lasted_scan_time:
                 break
