@@ -28,7 +28,7 @@ def battle_group_code_for_month(source_text, month):
     """Find the latest master-data battle group whose month suffix matches."""
     month_code = battle_code_for_month(month)
     candidates = set(
-        re.findall(rf'\b(4\d{{3}}{month_code})101\b', source_text)
+        re.findall(rf'\b(4\d{{3}}{month_code})108\b', source_text)
     )
     return max(candidates, default="")
 

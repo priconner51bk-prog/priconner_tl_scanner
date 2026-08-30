@@ -48,6 +48,13 @@ class BossNamesSyncTests(unittest.TestCase):
         self.assertIn("commits?per_page=1", calls[0][0])
         self.assertIn("/latest-sha/", calls[1][0])
 
+    def test_finds_group_from_the_fifth_boss_row(self):
+        source = '..., "メデューサ", 0, 401908108,\n'
+        self.assertEqual(
+            boss_names_sync.battle_group_code_for_month(source, 8),
+            "401908",
+        )
+
     def test_retry_sleeps_five_minutes_until_success(self):
         attempts = []
         sleeps = []
