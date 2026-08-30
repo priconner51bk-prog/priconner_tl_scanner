@@ -18,7 +18,7 @@ from runtime_utils import acquire_lock, run_locked
 
 class SafetyTests(unittest.TestCase):
     def test_monthly_boss_name_rotation(self):
-        self.assertEqual(boss_names_sync.battle_code_for_month(8), "4019")
+        self.assertEqual(boss_names_sync.battle_code_for_month(8), "08")
 
     def test_boss_sync_does_not_write_before_source_is_ready(self):
         sheet = SimpleNamespace(update=unittest.mock.Mock())
@@ -27,7 +27,7 @@ class SafetyTests(unittest.TestCase):
             boss_names_sync.sync_boss_names(
                 spreadsheet=spreadsheet,
                 now=datetime(2026, 8, 23),
-                fetch=lambda: '..., "ゴブリングレート", 0, 401901101,',
+                fetch=lambda: '..., "マダムエレクトラ", 0, 401908101,',
             )
         )
         sheet.update.assert_not_called()
@@ -40,21 +40,21 @@ class SafetyTests(unittest.TestCase):
                 spreadsheet=spreadsheet,
                 now=datetime(2026, 8, 23),
                 fetch=lambda: (
-                    '..., "ゴブリングレート", 0, 401901101,\n'
-                    '..., "ライライ", 0, 401901102,\n'
-                    '..., "ムーバ", 0, 401901103,\n'
-                    '..., "ネプテリオン", 0, 401901104,\n'
-                    '..., "ネプテリオンA", 0, 401901105,\n'
-                    '..., "ネプテリオンB", 0, 401901106,\n'
-                    '..., "ネプテリオンC", 0, 401901107,\n'
-                    '..., "アクアリオス", 0, 401901108,\n'
+                    '..., "マダムエレクトラ", 0, 401908101,\n'
+                    '..., "ミストシーカー", 0, 401908102,\n'
+                    '..., "バイオドーザー", 0, 401908103,\n'
+                    '..., "トライロッカー", 0, 401908104,\n'
+                    '..., "トライロッカーA", 0, 401908105,\n'
+                    '..., "トライロッカーB", 0, 401908106,\n'
+                    '..., "トライロッカーC", 0, 401908107,\n'
+                    '..., "メデューサ", 0, 401908108,\n'
                 ),
             )
         )
         sheet.update.assert_called_once()
         values, range_name = sheet.update.call_args.args[:2]
         self.assertEqual(range_name, "A2:A6")
-        self.assertEqual(values, [["ゴブリングレート"], ["ライライ"], ["ムーバ"], ["ネプテリオン"], ["アクアリオス"]])
+        self.assertEqual(values, [["マダムエレクトラ"], ["ミストシーカー"], ["バイオドーザー"], ["トライロッカー"], ["メデューサ"]])
 
     def test_scheduled_monitor_excludes_month_end_and_handles_february(self):
         self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2025, 2, 20).date()))

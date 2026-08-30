@@ -21,8 +21,16 @@ BOSS_COUNT = 5
 def battle_code_for_month(month):
     if not 1 <= month <= 12:
         raise ValueError("month must be between 1 and 12")
-    # Master data uses 4019 for August, 4018 for July, and so on.
-    return f"40{month + 11}"
+    return f"{month:02d}"
+
+
+def battle_group_code_for_month(source_text, month):
+    """Find the latest master-data battle group whose month suffix matches."""
+    month_code = battle_code_for_month(month)
+    candidates = set(
+        re.findall(rf'\b(4\d{{3}}{month_code})101\b', source_text)
+    )
+    return max(candidates, default="")
 
 
 def fetch_latest_commit_sha(
@@ -65,7 +73,7 @@ def extract_boss_names(source_text, battle_code):
     until the fifth one and ignore those part rows.
     """
     row_pattern = re.compile(
-        rf'\b({re.escape(battle_code)}01\d{{3}})\b'
+        rf'\b({re.escape(battle_code)}\d{{3}})\b'
     )
     names = []
     group_started = False
@@ -98,7 +106,9 @@ def sync_boss_names(
     fetch=fetch_source,
 ):
     now = now or datetime.now()
-    boss_names = extract_boss_names(fetch(), battle_code_for_month(now.month))
+    source = fetch()
+    group_code = battle_group_code_for_month(source, now.month)
+    boss_names = extract_boss_names(source, group_code) if group_code else []
     if len(boss_names) != BOSS_COUNT:
         print(f"Current month's {BOSS_COUNT} bosses are not available in master data")
         return False
