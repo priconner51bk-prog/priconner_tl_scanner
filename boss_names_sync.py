@@ -1,7 +1,7 @@
 """Synchronize the fixed monthly Clan Battle boss-name list to Google Sheets."""
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
@@ -13,6 +13,7 @@ SOURCE_URL = (
 )
 WORKSHEET_NAME = "ボス名"
 REQUEST_TIMEOUT = 20
+LATEST_COMMIT_URL = "https://api.github.com/repos/esterTion/redive_master_db_diff/commits?per_page=1"
 MONTHLY_BOSS_NAMES = (
     "アクアリオス", "トルペドン", "メサルティム", "ミノタウロス",
     "ツインピッグス", "カルキノス", "オルレオン", "メデューサ",
@@ -32,13 +33,32 @@ def fetch_source(url=SOURCE_URL, timeout=REQUEST_TIMEOUT, get=requests.get):
     return response.text
 
 
+def fetch_latest_commit_time(timeout=REQUEST_TIMEOUT, get=requests.get):
+    response = get(LATEST_COMMIT_URL, timeout=timeout)
+    response.raise_for_status()
+    value = response.json()[0]["commit"]["author"]["date"]
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def source_contains_boss(source_text, boss_name):
     return boss_name in source_text
 
 
-def sync_boss_names(spreadsheet=None, now=None, fetch=fetch_source):
+def sync_boss_names(
+    spreadsheet=None,
+    now=None,
+    fetch=fetch_source,
+    latest_commit=fetch_latest_commit_time,
+):
     now = now or datetime.now()
     current_name = boss_name_for_month(now.month)
+    updated_at = latest_commit()
+    if updated_at.astimezone(timezone.utc).date() != now.date():
+        print(f"Master data has not updated today: {updated_at.isoformat()}")
+        return False
+    if updated_at.astimezone(timezone.utc).hour < 3:
+        print(f"Master data update is before 12:00 JST: {updated_at.isoformat()}")
+        return False
     if not source_contains_boss(fetch(), current_name):
         print(f"Current boss is not available in master data: {current_name}")
         return False
