@@ -3,7 +3,35 @@ import unittest
 import boss_names_sync
 
 
+class FakeResponse:
+    def __init__(self, payload=None, text=""):
+        self.payload = payload
+        self.text = text
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.payload
+
+
 class BossNamesSyncTests(unittest.TestCase):
+    def test_fetch_source_uses_latest_commit_sha(self):
+        calls = []
+
+        def get(url, timeout):
+            calls.append((url, timeout))
+            if len(calls) == 1:
+                return FakeResponse([{"sha": "latest-sha"}])
+            return FakeResponse(text="最新コミットのSQL")
+
+        self.assertEqual(
+            boss_names_sync.fetch_source(get=get),
+            "最新コミットのSQL",
+        )
+        self.assertIn("commits?per_page=1", calls[0][0])
+        self.assertIn("/latest-sha/", calls[1][0])
+
     def test_retry_sleeps_five_minutes_until_success(self):
         attempts = []
         sleeps = []

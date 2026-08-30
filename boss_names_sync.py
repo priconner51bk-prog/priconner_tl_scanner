@@ -8,10 +8,9 @@ import requests
 
 import gspread_utils as gspread
 
-SOURCE_URL = (
-    "https://raw.githubusercontent.com/esterTion/redive_master_db_diff/"
-    "master/v1_006d327e17d5a53bf407981a40deb883041a2fe55e8519f568f8f9e41e1d3fbb.sql"
-)
+REPOSITORY = "esterTion/redive_master_db_diff"
+SOURCE_PATH = "v1_006d327e17d5a53bf407981a40deb883041a2fe55e8519f568f8f9e41e1d3fbb.sql"
+RAW_SOURCE_URL = f"https://raw.githubusercontent.com/{REPOSITORY}/{{commit}}/{SOURCE_PATH}"
 WORKSHEET_NAME = "ボス名"
 REQUEST_TIMEOUT = 20
 RETRY_INTERVAL = 5 * 60
@@ -28,8 +27,25 @@ def boss_name_for_month(month):
     return MONTHLY_BOSS_NAMES[month - 1]
 
 
-def fetch_source(url=SOURCE_URL, timeout=REQUEST_TIMEOUT, get=requests.get):
-    response = get(url, timeout=timeout)
+def fetch_latest_commit_sha(
+    timeout=REQUEST_TIMEOUT,
+    get=requests.get,
+):
+    response = get(
+        f"https://api.github.com/repos/{REPOSITORY}/commits?per_page=1",
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return response.json()[0]["sha"]
+
+
+def fetch_source(
+    commit=None,
+    timeout=REQUEST_TIMEOUT,
+    get=requests.get,
+):
+    commit = commit or fetch_latest_commit_sha(timeout=timeout, get=get)
+    response = get(RAW_SOURCE_URL.format(commit=commit), timeout=timeout)
     response.raise_for_status()
     return response.text
 
