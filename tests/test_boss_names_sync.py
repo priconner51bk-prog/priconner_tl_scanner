@@ -16,17 +16,20 @@ class FakeResponse:
 
 
 class BossNamesSyncTests(unittest.TestCase):
-    def test_extracts_first_five_bosses_in_order(self):
+    def test_extracts_five_main_bosses_and_skips_parts(self):
         source = (
-            '..., "ラットン", 30, 1, 0, 200600, 102190101, 1,'
-            '..., "ネジレアカシア", 30, 1, 0, 200901, 102190102, 1,'
-            '..., "トレント", 30, 1, 0, 200902, 102190103, 1,'
-            '..., "ゴブリンガード", 30, 1, 0, 203300, 102190104, 1,'
-            '..., "リーフボア", 30, 1, 0, 204700, 102190105, 1,'
+            '..., "ゴブリングレート", 0, 401901101,\n'
+            '..., "ライライ", 0, 401901102,\n'
+            '..., "ムーバ", 0, 401901103,\n'
+            '..., "ネプテリオン", 0, 401901104,\n'
+            '..., "ネプテリオンA", 0, 401901105,\n'
+            '..., "ネプテリオンB", 0, 401901106,\n'
+            '..., "ネプテリオンC", 0, 401901107,\n'
+            '..., "アクアリオス", 0, 401901108,\n'
         )
         self.assertEqual(
-            boss_names_sync.extract_boss_names(source, "10219"),
-            ["ラットン", "ネジレアカシア", "トレント", "ゴブリンガード", "リーフボア"],
+            boss_names_sync.extract_boss_names(source, "4019"),
+            ["ゴブリングレート", "ライライ", "ムーバ", "ネプテリオン", "アクアリオス"],
         )
 
     def test_fetch_source_uses_latest_commit_sha(self):

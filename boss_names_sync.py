@@ -21,7 +21,8 @@ BOSS_COUNT = 5
 def battle_code_for_month(month):
     if not 1 <= month <= 12:
         raise ValueError("month must be between 1 and 12")
-    return f"102{month + 11:02d}"
+    # Master data uses 4019 for August, 4018 for July, and so on.
+    return f"40{month + 11}"
 
 
 def fetch_latest_commit_sha(
@@ -47,20 +48,48 @@ def fetch_source(
     return response.text
 
 
-def extract_boss_names(source_text, battle_code):
-    pattern = re.compile(
-        rf',\s*"([^"]+)",\s*30,\s*1,\s*0,\s*\d+,\s*'
-        rf'({re.escape(battle_code)}\d{{4}}),\s*1,'
+def _is_boss_part(name):
+    return (
+        name == "バーストエネミー"
+        or any(name.endswith(suffix) for suffix in ("A", "B", "C", "D", "本体", "水瓶"))
+        or "部位" in name
+        or "子分" in name
     )
-    names_by_number = {}
-    for name, battle_id in pattern.findall(source_text):
-        number = int(battle_id[-2:])
-        if 1 <= number <= BOSS_COUNT:
-            names_by_number.setdefault(number, name)
-    names = [names_by_number.get(number) for number in range(1, BOSS_COUNT + 1)]
-    if any(name is None for name in names):
-        return []
-    return names
+
+
+def extract_boss_names(source_text, battle_code):
+    """Extract the first five main bosses in the first current battle group.
+
+    A fifth boss is not necessarily the fifth SQL row because some bosses have
+    parts.  The group is ordered by the source rows, so collect main-boss rows
+    until the fifth one and ignore those part rows.
+    """
+    row_pattern = re.compile(
+        rf'\b({re.escape(battle_code)}01\d{{3}})\b'
+    )
+    names = []
+    group_started = False
+    for line in source_text.splitlines():
+        match = row_pattern.search(line)
+        if not match:
+            continue
+        battle_id = match.group(1)
+        position = battle_id[-3:]
+        name_match = re.search(r',\s*"([^"]+)"', line)
+        if not name_match:
+            continue
+        if position == "101":
+            if group_started:
+                break
+            group_started = True
+        if not group_started:
+            continue
+        name = name_match.group(1)
+        if not _is_boss_part(name):
+            names.append(name)
+            if len(names) == BOSS_COUNT:
+                return names
+    return []
 
 
 def sync_boss_names(
