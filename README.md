@@ -16,6 +16,20 @@
 python3 monitor_runner.py
 ```
 
+GitHub の `main` 更新を自動取得する場合（Windows PowerShell）:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\register_auto_pull.ps1
+```
+
+15分ごとに `origin/main` を確認します。未コミット変更がある場合は安全のため
+スキップし、変更がない場合だけ fast-forward 更新します。停止する場合は次を実行します。
+
+```powershell
+Unregister-ScheduledTask -TaskName "PriconnerTlMovieScanner-GitPull" -Confirm:$false
+```
+
 月末の最終日を除く直前8日間だけ定期実行する場合は、ラズパイのcrontabに
 次の1行を登録します。`/path/to/priconner_tl_movie_scanner` は実際の配置先に
 置き換えてください。crontabは毎日呼び出しますが、`scheduled_monitor.py` が
