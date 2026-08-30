@@ -1,6 +1,7 @@
 """Synchronize the fixed monthly Clan Battle boss-name list to Google Sheets."""
 
 import argparse
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -13,6 +14,7 @@ SOURCE_URL = (
 )
 WORKSHEET_NAME = "ボス名"
 REQUEST_TIMEOUT = 20
+RETRY_INTERVAL = 5 * 60
 LATEST_COMMIT_URL = "https://api.github.com/repos/esterTion/redive_master_db_diff/commits?per_page=1"
 MONTHLY_BOSS_NAMES = (
     "アクアリオス", "トルペドン", "メサルティム", "ミノタウロス",
@@ -72,16 +74,32 @@ def sync_boss_names(
     return True
 
 
+def retry_until_success(
+    sync=sync_boss_names,
+    sleep=time.sleep,
+    retry_interval=RETRY_INTERVAL,
+):
+    """Retry synchronization forever, sleeping between unsuccessful attempts."""
+    while True:
+        try:
+            if sync():
+                return 0
+        except (OSError, requests.RequestException, RuntimeError, ValueError) as error:
+            print(f"Boss-name synchronization failed: {error}")
+        print(f"Retrying boss-name synchronization in {retry_interval} seconds.")
+        sleep(retry_interval)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--month", type=int)
     args = parser.parse_args(argv)
     now = datetime.now().replace(month=args.month) if args.month else None
-    try:
-        return 0 if sync_boss_names(now=now) else 1
-    except (OSError, requests.RequestException, RuntimeError, ValueError) as error:
-        print(f"Boss-name synchronization failed: {error}")
-        return 1
+    if now is not None:
+        return retry_until_success(
+            sync=lambda: sync_boss_names(now=now),
+        )
+    return retry_until_success()
 
 
 if __name__ == "__main__":
