@@ -16,6 +16,19 @@ class FakeResponse:
 
 
 class BossNamesSyncTests(unittest.TestCase):
+    def test_extracts_first_five_bosses_in_order(self):
+        source = (
+            '..., "ラットン", 30, 1, 0, 200600, 102190101, 1,'
+            '..., "ネジレアカシア", 30, 1, 0, 200901, 102190102, 1,'
+            '..., "トレント", 30, 1, 0, 200902, 102190103, 1,'
+            '..., "ゴブリンガード", 30, 1, 0, 203300, 102190104, 1,'
+            '..., "リーフボア", 30, 1, 0, 204700, 102190105, 1,'
+        )
+        self.assertEqual(
+            boss_names_sync.extract_boss_names(source, "10219"),
+            ["ラットン", "ネジレアカシア", "トレント", "ゴブリンガード", "リーフボア"],
+        )
+
     def test_fetch_source_uses_latest_commit_sha(self):
         calls = []
 

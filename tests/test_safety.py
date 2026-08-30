@@ -18,9 +18,7 @@ from runtime_utils import acquire_lock, run_locked
 
 class SafetyTests(unittest.TestCase):
     def test_monthly_boss_name_rotation(self):
-        self.assertEqual(boss_names_sync.boss_name_for_month(1), "アクアリオス")
-        self.assertEqual(boss_names_sync.boss_name_for_month(8), "メデューサ")
-        self.assertEqual(boss_names_sync.boss_name_for_month(12), "アルゲティ")
+        self.assertEqual(boss_names_sync.battle_code_for_month(8), "10219")
 
     def test_boss_sync_does_not_write_before_source_is_ready(self):
         sheet = SimpleNamespace(update=unittest.mock.Mock())
@@ -29,7 +27,7 @@ class SafetyTests(unittest.TestCase):
             boss_names_sync.sync_boss_names(
                 spreadsheet=spreadsheet,
                 now=datetime(2026, 8, 23),
-                fetch=lambda: "master data without this month's boss",
+                fetch=lambda: '..., "ラットン", 30, 1, 0, 200600, 102190101, 1,',
             )
         )
         sheet.update.assert_not_called()
@@ -41,13 +39,19 @@ class SafetyTests(unittest.TestCase):
             boss_names_sync.sync_boss_names(
                 spreadsheet=spreadsheet,
                 now=datetime(2026, 8, 23),
-                fetch=lambda: "...メデューサ...",
+                fetch=lambda: (
+                    '..., "ラットン", 30, 1, 0, 200600, 102190101, 1,'
+                    '..., "ネジレアカシア", 30, 1, 0, 200901, 102190102, 1,'
+                    '..., "トレント", 30, 1, 0, 200902, 102190103, 1,'
+                    '..., "ゴブリンガード", 30, 1, 0, 203300, 102190104, 1,'
+                    '..., "リーフボア", 30, 1, 0, 204700, 102190105, 1,'
+                ),
             )
         )
         sheet.update.assert_called_once()
         values, range_name = sheet.update.call_args.args[:2]
-        self.assertEqual(range_name, "A2:A13")
-        self.assertEqual(len(values), 12)
+        self.assertEqual(range_name, "A2:A6")
+        self.assertEqual(values, [["ラットン"], ["ネジレアカシア"], ["トレント"], ["ゴブリンガード"], ["リーフボア"]])
 
     def test_scheduled_monitor_excludes_month_end_and_handles_february(self):
         self.assertTrue(scheduled_monitor.is_monitor_day(datetime(2025, 2, 20).date()))
