@@ -30,6 +30,18 @@ Set-ExecutionPolicy -Scope Process Bypass
 Unregister-ScheduledTask -TaskName "PriconnerTlMovieScanner-GitPull" -Confirm:$false
 ```
 
+月末期間の監視タスクを登録する場合:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\register_monitor_tasks.ps1
+```
+
+月末8日前の12:00から月末12:00まで、`worrychefs.py` は10分、
+`youtube_channel.py` は30分、`youtube_search.py` は5分ごとに実行します。
+`boss_names_sync.py` は期間開始日の12:15に1回だけ実行します。
+期間外の起動はラッパーが自動的にスキップします。
+
 月末の最終日を除く直前8日間だけ定期実行する場合は、ラズパイのcrontabに
 次の1行を登録します。`/path/to/priconner_tl_movie_scanner` は実際の配置先に
 置き換えてください。crontabは毎日呼び出しますが、`scheduled_monitor.py` が
