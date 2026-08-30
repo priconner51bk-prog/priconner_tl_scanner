@@ -30,7 +30,6 @@ class SafetyTests(unittest.TestCase):
                 spreadsheet=spreadsheet,
                 now=datetime(2026, 8, 23),
                 fetch=lambda: "master data without this month's boss",
-                latest_commit=lambda: datetime(2026, 8, 23, 2, 59, tzinfo=timezone.utc),
             )
         )
         sheet.update.assert_not_called()
@@ -43,7 +42,6 @@ class SafetyTests(unittest.TestCase):
                 spreadsheet=spreadsheet,
                 now=datetime(2026, 8, 23),
                 fetch=lambda: "...メデューサ...",
-                latest_commit=lambda: datetime(2026, 8, 23, 3, 14, tzinfo=timezone.utc),
             )
         )
         sheet.update.assert_called_once()

@@ -4,7 +4,7 @@ import argparse
 import calendar
 import subprocess
 import sys
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -26,7 +26,9 @@ def window(now):
 def should_run(now, script):
     start, end = window(now)
     if script == "boss_names_sync.py":
-        return now.date() == start.date() and now.time() >= time(12, 15)
+        # Keep checking throughout the current month so a late upstream
+        # master-data update is not missed after the window start date.
+        return True
     return start <= now <= end
 
 
