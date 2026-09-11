@@ -5,6 +5,8 @@ damages_spreadsheet_id=id
 
 [discord]
 webhook_url=url
+timeout=10
+retries=2
 
 [youtube]
 period_days=7

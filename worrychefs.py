@@ -160,7 +160,12 @@ def checkNewArrivalsForWorryChefs(
 
     if tl_values:
         save_tl_values(sheet_tl, tl_values)
-        notify_tl_values(notify, last_link_url, tl_values)
+        try:
+            notify_tl_values(notify, last_link_url, tl_values)
+        except Exception as error:
+            # The TL rows are already durable; do not roll back the sheet or
+            # make the whole scheduled stage fail after a notification error.
+            print(f"失敗: WorryChefs通知: {error}")
 
 
 def main():

@@ -22,10 +22,19 @@ DEFAULT_CHANNEL_LIMIT = 20
 def _as_utc(value):
     """Return a datetime that can safely be compared with UTC timestamps."""
     if value.tzinfo is None or value.utcoffset() is None:
-        # Keep the existing application convention for naive local times;
-        # astimezone() resolves them using the machine's local timezone.
-        return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=datetime.JST).astimezone(timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _write_urls_with_retry(write_urls, urls, sleep, retries=2):
+    for attempt in range(retries + 1):
+        try:
+            return write_urls(urls)
+        except Exception as error:
+            if attempt >= retries:
+                raise
+            print(f"URL登録を再試行します ({attempt + 1}/{retries}): {error}")
+            sleep(2**attempt)
 
 
 class YTDLPVideo:
@@ -84,7 +93,7 @@ class YTDLPChannel:
             info = ydl.extract_info(videos_url, download=False) or {}
         self.channel_name = info.get("channel") or info.get("uploader", "")
         self.channel_url = info.get("channel_url") or url
-        entries = info.get("entries", [])
+        entries = list(info.get("entries") or [])
         self.entry_count = len(entries)
         self.videos = []
         for entry in entries:
@@ -167,13 +176,14 @@ def checkNewArrivalsForYouTube(
     sheetVideo = ss.worksheet("YouTube動画")
     count = 0
     damage_urls = []
+    pending_posts = []
 
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     videoUrls = sheetVideo.col_values(5)
     known_video_urls = set(videoUrls)
     rows = sheetChannel.get_all_values()
-    period_days = int(
-        gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
+    period_days = gspread.get_int_config_value(
+        "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
     now = _as_utc(now_factory())
     lasted_scan_time = datetime.calcDate(now, period_days)
@@ -197,74 +207,121 @@ def checkNewArrivalsForYouTube(
         videoValues = []
         channelUrl = f"{URL_YOUTUBE_CHANNEL}{channelId}"
         print(f"channelUrl:{channelUrl}")
-        ch = channel_factory(channelUrl, playlist_start=1)
-
-        for yt in ch.videos:
+        page_seen = set()
+        page_start = 1
+        while True:
+            ch = channel_factory(channelUrl, playlist_start=page_start)
+            page_videos = list(getattr(ch, "videos", []) or [])
+            entry_count = getattr(ch, "entry_count", len(page_videos))
             try:
-                videoUrl = yt.watch_url
-            except Exception as e:
-                print(f"skip: invalid video object error={e}")
-                continue
+                entry_count = int(entry_count)
+            except (TypeError, ValueError):
+                entry_count = len(page_videos)
+            page_urls = tuple(
+                getattr(video, "watch_url", None) for video in page_videos
+            )
+            if page_urls and page_urls in page_seen:
+                print("skip: repeated YouTube channel page")
+                break
+            if page_urls:
+                page_seen.add(page_urls)
 
-            print(f"videoUrl:{videoUrl}")
-
-            if videoUrl in known_video_urls:
-                # Entries are newest first. Once a known entry is reached,
-                # older entries cannot produce a new result.
+            if not page_videos:
                 break
 
-            publishDate = yt.publish_date
-            if publishDate is None:
-                # Flat playlist entries occasionally omit upload_date. Since
-                # this is a managed channel and the entry is before the first
-                # known video, keeping it is safer than silently losing a new
-                # upload. The next run deduplicates it by URL.
-                print("upload date unavailable; keeping entry")
-                publishDate = now
-            else:
-                publishDate = _as_utc(publishDate)
+            stop_channel = False
+            for yt in page_videos:
+                try:
+                    videoUrl = yt.watch_url
+                except Exception as e:
+                    print(f"skip: invalid video object error={e}")
+                    continue
 
-            if publishDate <= lasted_scan_time:
+                print(f"videoUrl:{videoUrl}")
+
+                if videoUrl in known_video_urls:
+                    # Entries are newest first. Once a known entry is reached,
+                    # older entries cannot produce a new result.
+                    stop_channel = True
+                    break
+
+                publishDate = yt.publish_date
+                if publishDate is None:
+                    # Flat playlist entries occasionally omit upload_date. Since
+                    # this is a managed channel and the entry is before the first
+                    # known video, keeping it is safer than silently losing a new
+                    # upload. The next run deduplicates it by URL.
+                    print("upload date unavailable; keeping entry")
+                    publishDate = now
+                else:
+                    publishDate = _as_utc(publishDate)
+
+                if publishDate <= lasted_scan_time:
+                    stop_channel = True
+                    break
+
+                if len(publishDateString) == 0 or publishDate > datetime.string2DateTime(
+                    publishDateString
+                ):
+                    publishDateString = datetime.dateTime2String(publishDate)
+
+                values = [
+                    channelName,
+                    channelUrl,
+                    datetime.dateTime2String(publishDate),
+                    yt.title,
+                    videoUrl,
+                ]
+                print(f"YouTube動画タイトル「{yt.title}」")
+                videoValues.append(values)
+                videoUrls.append(videoUrl)
+                known_video_urls.add(videoUrl)
+
+                count += 1
+                damage_urls.append(videoUrl)
+
+            if stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT:
                 break
-
-            if len(publishDateString) == 0 or publishDate > datetime.string2DateTime(
-                publishDateString
-            ):
-                publishDateString = datetime.dateTime2String(publishDate)
-
-            values = [
-                channelName,
-                channelUrl,
-                datetime.dateTime2String(publishDate),
-                yt.title,
-                videoUrl,
-            ]
-            print(f"YouTube動画タイトル「{yt.title}」")
-            videoValues.append(values)
-            videoUrls.append(videoUrl)
-            known_video_urls.add(videoUrl)
-
-            count += 1
-            damage_urls.append(videoUrl)
-            post(videoUrl)
-            sleep(wait_time)
+            page_start += DEFAULT_CHANNEL_LIMIT
 
         if len(videoValues) > 0:
             sheetVideo.insert_rows(videoValues, row=2)
 
+            # Defer notifications until both the arrival rows and damage URLs
+            # have had a chance to become durable.
+            pending_posts.extend(damage_urls[-len(videoValues) :])
+
         channelValues = [[publishDateString, nowScanTime]]
-        sheetChannel.update(
-            channelValues,
-            sheetChannel.cell(i, 5).address,
-            value_input_option="USER_ENTERED",
-        )
+        try:
+            sheetChannel.update(
+                channelValues,
+                sheetChannel.cell(i, 5).address,
+                value_input_option="USER_ENTERED",
+            )
+        except Exception as error:
+            # The arrival rows are already durable; a metadata update should
+            # not suppress the pending URL registration and notifications.
+            print(f"失敗: YouTubeチャンネル状態更新: {error}")
 
         sleep(wait_time)
 
-    write_urls(damage_urls)
+    try:
+        _write_urls_with_retry(write_urls, damage_urls, sleep)
+    except Exception as error:
+        print(f"失敗: YouTube URL登録: {error}")
+
+    for videoUrl in pending_posts:
+        try:
+            post(videoUrl)
+        except Exception as error:
+            print(f"失敗: YouTube URL通知 {videoUrl}: {error}")
+        sleep(wait_time)
 
     if count > 0:
-        notify(f"Youtube新着{count}件")
+        try:
+            notify(f"Youtube新着{count}件")
+        except Exception as error:
+            print(f"失敗: YouTube集計通知: {error}")
 
     if count > 0:
         sheetVideo.sort((3, "des"), range="A2:Z10000")
@@ -288,6 +345,13 @@ def write_urls_to_youtube_sheet(urls):
     # スプレッドシート取得
     ss = gspread.getDamagesSheet()
     sheet = ss.worksheet("Youtube")
+
+    # A partially completed prior write must not create a duplicate URL when
+    # this operation is retried.
+    existing_urls = set(sheet.col_values(1))
+    urls = [url for url in urls if url not in existing_urls]
+    if not urls:
+        return
 
     gspread.writeToFirstEmptyCells(sheet, urls, wait_time=WAIT_TIME)
 

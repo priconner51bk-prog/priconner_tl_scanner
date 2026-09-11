@@ -15,7 +15,13 @@ class LockBusy(Exception):
     """Raised when another local monitor process owns the lock."""
 
 
+RUNTIME_DIR_ENV = "PRICONNER_MONITOR_RUNTIME_DIR"
+
+
 def default_runtime_dir():
+    configured_runtime_dir = os.environ.get(RUNTIME_DIR_ENV)
+    if configured_runtime_dir:
+        return Path(configured_runtime_dir).expanduser()
     state_home = os.environ.get("XDG_STATE_HOME")
     if state_home:
         return Path(state_home) / "priconner-tl-movie-scanner"

@@ -46,6 +46,20 @@ def get_config_value(section, key, fallback=None):
     return fallback
 
 
+def get_int_config_value(section, key, fallback, minimum=None, maximum=None):
+    """Read an integer setting without allowing malformed config to stop a scan."""
+    value = get_config_value(section, key, fallback)
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = fallback
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
 def _get_client():
     global _client
     if _client is None:

@@ -1,6 +1,7 @@
 """Run the scheduled monitoring stages and persist non-secret runtime state."""
 
 import argparse
+from configparser import ConfigParser
 import json
 import os
 import subprocess
@@ -18,6 +19,15 @@ STAGE_SCRIPTS = {
     "youtube-search": "youtube_search.py",
     "worrychefs": "worrychefs.py",
 }
+
+
+def _monitor_config_value(key, fallback=None):
+    config = ConfigParser()
+    config_path = ROOT_DIR / "config.ini"
+    if config_path.exists():
+        config.read(config_path, encoding="utf-8")
+    value = config.get("monitor", key, fallback=fallback)
+    return value.strip() if value else fallback
 
 
 class StateStore:
@@ -66,7 +76,7 @@ def run_stages(
     root_dir=ROOT_DIR,
     clock=None,
 ):
-    runtime_dir = Path(runtime_dir)
+    runtime_dir = Path(runtime_dir).expanduser().resolve()
     store = StateStore(runtime_dir / "state.json", clock=clock)
     started_at = (clock or (lambda: datetime.now(timezone.utc)))().isoformat()
     store.update(
@@ -112,16 +122,28 @@ def run_stages(
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runtime-dir", type=Path, default=default_runtime_dir())
+    parser.add_argument("--runtime-dir", type=Path, default=None)
     parser.add_argument(
         "--stages",
-        default=os.environ.get("PRICONNER_MONITOR_STAGES", ",".join(DEFAULT_STAGES)),
+        default=None,
     )
     args = parser.parse_args(argv)
+    runtime_dir = args.runtime_dir
+    if runtime_dir is None:
+        runtime_dir = Path(
+            os.environ.get("PRICONNER_MONITOR_RUNTIME_DIR")
+            or _monitor_config_value("runtime_dir")
+            or default_runtime_dir()
+        ).expanduser()
+    stages_value = args.stages
+    if stages_value is None:
+        stages_value = os.environ.get("PRICONNER_MONITOR_STAGES") or _monitor_config_value(
+            "stages", ",".join(DEFAULT_STAGES)
+        )
     try:
-        stages = parse_stages(args.stages)
-        with acquire_lock(args.runtime_dir / "monitor_runner.lock"):
-            return run_stages(stages, args.runtime_dir)
+        stages = parse_stages(stages_value)
+        with acquire_lock(runtime_dir / "monitor_runner.lock"):
+            return run_stages(stages, runtime_dir)
     except LockBusy:
         print("Another monitor run is already in progress; skipping.")
         return 0

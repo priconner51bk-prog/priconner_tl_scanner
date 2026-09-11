@@ -17,6 +17,12 @@ DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 50
 
 
+def _as_utc(value):
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=datetime.JST).astimezone(timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class YTDLPVideo:
     def __init__(self, info):
         self._info = info
@@ -62,12 +68,23 @@ class YTDLPChannel:
         self.channel_url = info.get("channel_url") or url
 
 
+def _write_urls_with_retry(write_urls, urls, sleep, retries=2):
+    for attempt in range(retries + 1):
+        try:
+            return write_urls(urls)
+        except Exception as error:
+            if attempt >= retries:
+                raise
+            print(f"URL登録を再試行します ({attempt + 1}/{retries}): {error}")
+            sleep(2**attempt)
+
+
 def search_youtube(query, now_factory=None):
-    period_days = int(
-        gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
+    period_days = gspread.get_int_config_value(
+        "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
-    search_limit = int(
-        gspread.get_config_value("youtube", "search_limit", DEFAULT_SEARCH_LIMIT)
+    search_limit = gspread.get_int_config_value(
+        "youtube", "search_limit", DEFAULT_SEARCH_LIMIT, minimum=1, maximum=MAX_SEARCH_LIMIT
     )
     search_limit = max(1, min(search_limit, MAX_SEARCH_LIMIT))
     options = {
@@ -79,7 +96,7 @@ def search_youtube(query, now_factory=None):
     }
     with YoutubeDL(options) as ydl:
         result = ydl.extract_info(f"ytsearch{search_limit}:{query}", download=False)
-    now = now_factory() if now_factory else DateTime.now(timezone.utc)
+    now = _as_utc(now_factory() if now_factory else DateTime.now(timezone.utc))
     cutoff = now - timedelta(days=period_days)
     videos = []
     seen_urls = set()
@@ -102,14 +119,14 @@ def is_recent_video(video, now=None, period_days=None):
     """Return whether a video falls within the configured period."""
     now = now or DateTime.now(timezone.utc)
     if period_days is None:
-        period_days = int(
-            gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
+        period_days = gspread.get_int_config_value(
+            "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
         )
     publish_date = video.publish_date
     if publish_date is None:
         return False
-    if publish_date.tzinfo is None:
-        publish_date = publish_date.replace(tzinfo=timezone.utc)
+    publish_date = _as_utc(publish_date)
+    now = _as_utc(now)
     return publish_date >= now - timedelta(days=period_days)
 
 
@@ -149,11 +166,12 @@ def findYouTubeVideo(
 
     count = 0
     damage_urls = []
+    pending_posts = []
     videoUrls = sheetVideo.col_values(5)
     known_video_urls = set(videoUrls)
     channelIds = sheetChannel.col_values(2)
-    period_days = int(
-        gspread.get_config_value("youtube", "period_days", DEFAULT_PERIOD_DAYS)
+    period_days = gspread.get_int_config_value(
+        "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
     channel_name_cache = {}
     channel_values = []
@@ -218,8 +236,6 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            post(videoUrl)
-            sleep(wait_time)
 
         sleep(wait_time)
 
@@ -227,11 +243,25 @@ def findYouTubeVideo(
         sheetChannel.insert_rows(channel_values, row=2)
     if video_values:
         sheetVideo.insert_rows(video_values, row=2)
+        pending_posts.extend(damage_urls)
 
-    write_urls(damage_urls)
+    try:
+        _write_urls_with_retry(write_urls, damage_urls, sleep)
+    except Exception as error:
+        print(f"失敗: YouTube URL登録: {error}")
+
+    for videoUrl in pending_posts:
+        try:
+            post(videoUrl)
+        except Exception as error:
+            print(f"失敗: YouTube URL通知 {videoUrl}: {error}")
+        sleep(wait_time)
 
     if count > 0:
-        notify(f"Youtube新着{count}件")
+        try:
+            notify(f"Youtube新着{count}件")
+        except Exception as error:
+            print(f"失敗: YouTube集計通知: {error}")
 
     if video_values:
         sheetVideo.sort((3, "des"), range="A2:Z10000")
@@ -256,6 +286,11 @@ def write_urls_to_youtube_sheet(urls):
     # スプレッドシート取得
     ss = gspread.getDamagesSheet()
     sheet = ss.worksheet("Youtube")
+
+    existing_urls = set(sheet.col_values(1))
+    urls = [url for url in urls if url not in existing_urls]
+    if not urls:
+        return
 
     gspread.writeToFirstEmptyCells(sheet, urls, wait_time=WAIT_TIME)
 

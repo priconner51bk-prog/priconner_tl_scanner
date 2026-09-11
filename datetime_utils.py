@@ -6,11 +6,13 @@ JST = timezone(timedelta(hours=9), "JST")
 
 
 def dateTime2String(dateTime):
+    if dateTime.tzinfo is None or dateTime.utcoffset() is None:
+        dateTime = dateTime.replace(tzinfo=JST)
     return dateTime.astimezone(JST).strftime(DATE_FORMAT)
 
 
 def string2DateTime(str):
-    dateTime = datetime.strptime(str, DATE_FORMAT)
+    dateTime = datetime.strptime(str, DATE_FORMAT).replace(tzinfo=JST)
     return dateTime.astimezone(timezone.utc)
 
 
@@ -20,11 +22,13 @@ def isoString2DateTime(str):
 
 
 def calcDate(datetime, days):
+    if datetime.tzinfo is None or datetime.utcoffset() is None:
+        datetime = datetime.replace(tzinfo=JST)
     return (datetime - timedelta(days=days)).astimezone(timezone.utc)
 
 
 def now():
-    return datetime.now()
+    return datetime.now(JST)
 
 
 def nowString():
