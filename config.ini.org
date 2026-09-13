@@ -8,14 +8,21 @@ webhook_url=url
 timeout=10
 retries=2
 
+[discord_channel]
+token=
+guild_id=883641935175233646
+channel_ids=888411637185388585
+limit=100
+
 [youtube]
 period_days=7
 search_limit=20
 
 [monitor]
 runtime_dir=
-stages=youtube-channel,youtube-search,worrychefs
+stages=youtube-channel,youtube-search,worrychefs,discord-channel
 python=python3
+markdown_output_dir=
 
 [maintenance]
 inactive_days=90

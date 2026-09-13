@@ -13,6 +13,7 @@ ALLOWED_SCRIPTS = {
     "youtube_channel.py",
     "youtube_search.py",
     "boss_names_sync.py",
+    "discord_channel.py",
 }
 
 

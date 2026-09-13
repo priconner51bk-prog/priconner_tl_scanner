@@ -11,6 +11,7 @@
 - 実行状態は `XDG_STATE_HOME` 配下（未設定時は `~/.local/state/priconner-tl-movie-scanner`）の `state.json` に保存します。認証情報、`config.ini`、状態ファイルはGitへ登録しません。
 - `config.ini.org` を `config.ini` にコピーして各種ID・認証情報・監視設定を記入します。監視設定はコマンドライン引数、環境変数、`config.ini`、既定値の順で優先されます。
 - Discord通知は `timeout` 秒で打ち切り、`retries` 回まで待機時間を伸ばして再試行します。到着データをSheetsへ保存してからURL登録・通知を行います。
+- Discordチャンネル監視は`[discord_channel]`設定でサーバー・チャンネルを指定します。Discordユーザートークン（Bot登録不要）またはBotトークンでメッセージ本文・埋め込み・添付からYouTubeリンクを検出し、`limit` 件まで新しい順に取得します。既にSheetsへ記録済みのURLは重複排除し、429応答は`Retry-After`を待ってから再試行します。
 
 通常の実行:
 
@@ -64,3 +65,11 @@ python3 boss_names_sync.py
 `[maintenance] inactive_days` 未満の新しい動画記録があるチャンネルは、自動除外印が解除されます。動画記録がないチャンネルや手動設定の除外印は変更しません。
 
 動画の対象判定には、タイトルだけでなく概要欄・タグ・ボス名・TL用語も使用します。他ゲーム名を含む動画は減点して対象外にします。
+
+DiscordチャンネルのメッセージからYouTubeリンクを検出する場合:
+
+```sh
+python3 discord_channel.py
+```
+
+`[discord_channel]` セクションに `token`（DiscordユーザートークンまたはBotトークン）、`guild_id`（サーバーID）、`channel_ids`（カンマ区切りのチャンネルID）、`limit`（取得メッセージ上限）を記入します。Bot登録が不要な場合、Discordユーザートークン（Discord設定 > OAuth2 > トークン）を使用できます。対象チャンネルにアクセス権があるユーザーであればそのまま読み取れます。

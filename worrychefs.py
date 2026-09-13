@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
+from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 
 
@@ -160,6 +161,22 @@ def checkNewArrivalsForWorryChefs(
 
     if tl_values:
         save_tl_values(sheet_tl, tl_values)
+        for tl_value, scan_time in tl_values:
+            code, damage, style = tl_value.split(",", 2)
+            write_arrival(
+                "worrychefs",
+                f"動画用TL情報 {code}",
+                last_link_url,
+                notes="WorryChefsスプレッドシートから抽出した動画用TL情報",
+                notes_history=[f"{scan_time}: WorryChefsから新規抽出"],
+                details={
+                    "動画用TL情報": tl_value,
+                    "ボスコード": code,
+                    "ダメージ": damage,
+                    "操作方式": style,
+                    "元スプレッドシート": last_link_url,
+                },
+            )
         try:
             notify_tl_values(notify, last_link_url, tl_values)
         except Exception as error:

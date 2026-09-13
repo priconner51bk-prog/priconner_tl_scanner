@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 import monitor_runner
 import scheduled_monitor
+import discord_channel
+import tools.discord_token_fetch as token_fetch
 import sheets_maintenance
 import video_relevance
 import youtube_channel
@@ -433,6 +435,168 @@ class SafetyTests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         self.assertEqual(calls[0][1]["env"]["PRICONNER_MONITOR_RUNTIME_DIR"], directory)
+
+    def test_discord_url_extraction_covers_text_embeds_and_attachments(self):
+        message = {
+            "content": "new video https://youtu.be/abc123 and https://www.youtube.com/watch?v=xyz",
+            "embeds": [
+                {"url": "https://www.youtube.com/watch?v=embed1"},
+                {"video_url": "https://youtube.com/shorts/short1"},
+            ],
+            "attachments": [
+                {"url": "https://youtube.com/live/live1"},
+                {"url": "https://example.com/not-youtube"},
+            ],
+        }
+        self.assertEqual(
+            discord_channel.extract_youtube_urls(message),
+            [
+                "https://www.youtube.com/watch?v=abc123",
+                "https://www.youtube.com/watch?v=embed1",
+                "https://www.youtube.com/watch?v=live1",
+                "https://www.youtube.com/watch?v=short1",
+                "https://www.youtube.com/watch?v=xyz",
+            ],
+        )
+
+    def test_discord_fetch_honors_rate_limit_before_success(self):
+        sleeps = []
+        responses = [
+            SimpleNamespace(
+                status_code=429,
+                headers={"Retry-After": "2"},
+                raise_for_status=lambda: None,
+            ),
+            SimpleNamespace(
+                status_code=200,
+                headers={},
+                raise_for_status=lambda: None,
+                json=lambda: [{"content": "hi"}],
+            ),
+        ]
+
+        def fake_get(url, **kwargs):
+            return responses.pop(0)
+
+        messages = discord_channel.fetch_channel_messages(
+            "channel-1",
+            "token",
+            http_get=fake_get,
+            retry_sleep=sleeps.append,
+        )
+        self.assertEqual(messages, [{"content": "hi"}])
+        self.assertEqual(sleeps, [2])
+
+    def test_discord_stage_skips_when_unconfigured(self):
+        with patch.dict(os.environ, {"DISCORD_TOKEN": "", "DISCORD_CHANNEL_IDS": ""}, clear=False):
+            self.assertIsNone(
+                discord_channel.checkNewArrivalsForDiscordChannel(
+                    post=lambda *_args: None,
+                    notify=lambda *_args: None,
+                )
+            )
+
+    def test_discord_stage_records_new_urls_and_notifies(self):
+        class FakeSheet:
+            def __init__(self):
+                self.col_values_1 = ["https://www.youtube.com/watch?v=known"]
+                self.written = []
+
+            def col_values(self, column):
+                return self.col_values_1
+
+            def update(self, values, *_args, **_kwargs):
+                self.written.extend(values)
+
+        sheet = FakeSheet()
+        spreadsheet = SimpleNamespace(worksheet=lambda _name: sheet)
+        posted = []
+        notified = []
+        with (
+            patch.dict(
+                os.environ,
+                {"DISCORD_TOKEN": "token", "DISCORD_CHANNEL_IDS": "ch1"},
+                clear=False,
+            ),
+            patch.object(
+                discord_channel.gspread,
+                "get_config_value",
+                side_effect=lambda section, key, fallback=None: (
+                    "guild-1" if key == "guild_id" else fallback
+                ),
+            ),
+            patch.object(
+                discord_channel.gspread,
+                "get_int_config_value",
+                return_value=100,
+            ),
+            patch.object(
+                discord_channel.gspread,
+                "getDamagesSheet",
+                return_value=spreadsheet,
+            ),
+            patch.object(
+                discord_channel.gspread,
+                "writeToFirstEmptyCells",
+                lambda sheet_, values, wait_time=0: sheet_.update([[v] for v in values]),
+            ),
+            patch.object(discord_channel, "write_arrival", return_value=None),
+        ):
+            def fake_http_get(url, **kwargs):
+                return SimpleNamespace(
+                    status_code=200,
+                    headers={},
+                    raise_for_status=lambda: None,
+                    json=lambda: [
+                        {
+                            "content": "https://www.youtube.com/watch?v=known",
+                        },
+                        {
+                            "content": "https://youtu.be/new1",
+                        },
+                    ],
+                )
+
+            def fake_video_info(url):
+                return {
+                    "title": "title",
+                    "publish_date": None,
+                    "channel_name": "channel",
+                }
+
+            discord_channel.checkNewArrivalsForDiscordChannel(
+                spreadsheet=spreadsheet,
+                http_get=fake_http_get,
+                post=posted.append,
+                notify=notified.append,
+                video_info_factory=fake_video_info,
+            )
+
+        self.assertEqual(sheet.written, [["https://www.youtube.com/watch?v=new1"]])
+        self.assertEqual(posted, ["https://www.youtube.com/watch?v=new1"])
+        self.assertEqual(notified, ["Discord新着1件"])
+
+    def test_token_fetch_saves_token_into_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.ini"
+            config_path.write_text(
+                "[discord]\nwebhook_url=url\n\n[discord_channel]\ntoken=old\nguild_id=g1\nchannel_ids=c1\n\n[youtube]\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(token_fetch._save_token("new-token", config_path))
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn("token=new-token", text)
+            self.assertIn("guild_id=g1", text)
+            self.assertNotIn("token=old", text)
+
+    def test_token_fetch_appends_missing_section(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.ini"
+            config_path.write_text("[discord]\nwebhook_url=url\n", encoding="utf-8")
+            self.assertTrue(token_fetch._save_token("tok", config_path))
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn("[discord_channel]", text)
+            self.assertIn("token=tok", text)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import discord_utils as discord
 import gspread_utils as gspread
 from runtime_utils import run_locked
 from video_relevance import is_relevant_video
+from new_arrivals_markdown import write_arrival
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
@@ -230,12 +231,17 @@ def findYouTubeVideo(
             video_values.append(
                 [channelName, channelUrl, publishDate, videoTitle, videoUrl]
             )
+            write_arrival("youtube-search", videoTitle, videoUrl, video.publish_date,
+                          channel_name=channelName,
+                          notes=f"対象ボス: {bossName}",
+                          details={"channel_url": channelUrl})
             print(video_values[-1:])
             videoUrls.append(videoUrl)
             known_video_urls.add(videoUrl)
 
             count += 1
             damage_urls.append(videoUrl)
+            pending_posts.append((videoUrl, videoTitle, f"対象ボス: {bossName}"))
 
         sleep(wait_time)
 
@@ -243,16 +249,15 @@ def findYouTubeVideo(
         sheetChannel.insert_rows(channel_values, row=2)
     if video_values:
         sheetVideo.insert_rows(video_values, row=2)
-        pending_posts.extend(damage_urls)
 
     try:
         _write_urls_with_retry(write_urls, damage_urls, sleep)
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
 
-    for videoUrl in pending_posts:
+    for videoUrl, videoTitle, notes in pending_posts:
         try:
-            post(videoUrl)
+            post(f"動画タイトル: {videoTitle}\n備考: {notes}\n動画URL: {videoUrl}")
         except Exception as error:
             print(f"失敗: YouTube URL通知 {videoUrl}: {error}")
         sleep(wait_time)

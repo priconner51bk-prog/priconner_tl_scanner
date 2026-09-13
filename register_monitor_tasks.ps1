@@ -5,7 +5,7 @@ $python = (Get-Command pythonw -ErrorAction Stop).Source
 $runner = Join-Path $repo "scheduled_window_runner.py"
 $taskPrefix = "PriconnerTlMovieScanner-"
 
-foreach ($name in @("worrychefs.py", "youtube_channel.py", "youtube_search.py", "boss_names_sync.py")) {
+foreach ($name in @("worrychefs.py", "youtube_channel.py", "youtube_search.py", "boss_names_sync.py", "discord_channel.py")) {
     $taskName = "$taskPrefix$name"
     Unregister-ScheduledTask -TaskName $taskName -TaskPath "\" -Confirm:$false -ErrorAction SilentlyContinue
 }
@@ -23,6 +23,7 @@ function Register-WindowTask($scriptName, $intervalMinutes) {
 Register-WindowTask "worrychefs.py" 10
 Register-WindowTask "youtube_channel.py" 30
 Register-WindowTask "youtube_search.py" 5
+Register-WindowTask "discord_channel.py" 5
 
 $bossAction = New-ScheduledTaskAction -Execute $python -Argument "`"$runner`" boss_names_sync.py"
 $bossTrigger = New-ScheduledTaskTrigger -Daily -At "12:15"

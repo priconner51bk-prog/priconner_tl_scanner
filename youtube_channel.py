@@ -8,6 +8,7 @@ import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
 from runtime_utils import run_locked
+from new_arrivals_markdown import write_arrival
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # Network calls are already rate limited by YouTube/Discord.  A four second
@@ -274,11 +275,15 @@ def checkNewArrivalsForYouTube(
                 ]
                 print(f"YouTube動画タイトル「{yt.title}」")
                 videoValues.append(values)
+                write_arrival("youtube-channel", yt.title, videoUrl, yt.publish_date,
+                              channel_name=channelName,
+                              details={"channel_url": channelUrl})
                 videoUrls.append(videoUrl)
                 known_video_urls.add(videoUrl)
 
                 count += 1
                 damage_urls.append(videoUrl)
+                pending_posts.append((videoUrl, yt.title, "登録チャンネルの新着動画"))
 
             if stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT:
                 break
@@ -289,7 +294,6 @@ def checkNewArrivalsForYouTube(
 
             # Defer notifications until both the arrival rows and damage URLs
             # have had a chance to become durable.
-            pending_posts.extend(damage_urls[-len(videoValues) :])
 
         channelValues = [[publishDateString, nowScanTime]]
         try:
@@ -310,9 +314,9 @@ def checkNewArrivalsForYouTube(
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
 
-    for videoUrl in pending_posts:
+    for videoUrl, videoTitle, notes in pending_posts:
         try:
-            post(videoUrl)
+            post(f"動画タイトル: {videoTitle}\n備考: {notes}\n動画URL: {videoUrl}")
         except Exception as error:
             print(f"失敗: YouTube URL通知 {videoUrl}: {error}")
         sleep(wait_time)

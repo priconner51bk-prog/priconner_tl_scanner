@@ -13,11 +13,12 @@ from pathlib import Path
 from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 
 ROOT_DIR = Path(__file__).resolve().parent
-DEFAULT_STAGES = ("youtube-channel", "youtube-search", "worrychefs")
+DEFAULT_STAGES = ("youtube-channel", "youtube-search", "worrychefs", "discord-channel")
 STAGE_SCRIPTS = {
     "youtube-channel": "youtube_channel.py",
     "youtube-search": "youtube_search.py",
     "worrychefs": "worrychefs.py",
+    "discord-channel": "discord_channel.py",
 }
 
 
