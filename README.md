@@ -73,3 +73,31 @@ python3 discord_channel.py
 ```
 
 `[discord_channel]` セクションに `token`（DiscordユーザートークンまたはBotトークン）、`guild_id`（サーバーID）、`channel_ids`（カンマ区切りのチャンネルID）、`limit`（取得メッセージ上限）を記入します。Bot登録が不要な場合、Discordユーザートークン（Discord設定 > OAuth2 > トークン）を使用できます。対象チャンネルにアクセス権があるユーザーであればそのまま読み取れます。
+
+#### トークンの取得
+
+Discord ユーザートークンは定期的に失効するため、失効した場合は再取得が必要です。
+以下の 2 つのツールで取得できます。
+
+**1. 手動取得（対話式）**: `tools/discord_token_fetch.py`
+
+```sh
+python3 tools/discord_token_fetch.py
+```
+
+Discord のブラウザで `F12 → Console` に `mbi.user.token` を実行して得たトークンを貼り付けると、
+検証（`GET /users/@me`）とサンプルチャンネルの読み取りテストを経て、
+`config.ini` の `[discord_channel] token=` に保存されます。
+
+**2. 自動取得（CDP）**: `tools/discord_token_autofetch.py`
+
+```sh
+python3 tools/discord_token_autofetch.py
+```
+
+新規 Chrome プロファイルでリモートデバッグポートを起動し、Discord のログインページを開きます。
+開いたウィンドウでログインすると、DevTools Protocol を経由して `localStorage.token` を自動で評価し、
+検証して `config.ini` に保存します。デフォルトプロファイルがロックダウンされている環境でも動作します。
+
+> 注意: ユーザートークンはアカウント全体へのフルアクセスを付与します（2FA を迂回）。
+> 他人に共有しないでください。失効させたい場合はパスワードを変更するとトークンが自動再生成されます。
