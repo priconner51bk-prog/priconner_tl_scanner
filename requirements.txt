@@ -4,3 +4,4 @@ oauth2client
 yt-dlp[default]
 requests
 ruff
+websocket-client
