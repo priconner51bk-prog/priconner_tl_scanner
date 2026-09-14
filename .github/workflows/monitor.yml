@@ -37,10 +37,10 @@ jobs:
 
       - name: Write temporary credentials
         env:
-          GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
           DISCORD_CHANNELS_JSON_CONTENT: ${{ secrets.DISCORD_CHANNELS_JSON }}
         run: |
-          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT" > service_account.json
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 --decode > service_account.json
           printf '%s' "$DISCORD_CHANNELS_JSON_CONTENT" > discord_channels.json
 
       - name: Run monitor
