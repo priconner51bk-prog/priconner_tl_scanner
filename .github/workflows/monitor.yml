@@ -49,7 +49,7 @@ jobs:
               prefix = raw[:start + len('"private_key": "')]
               key = raw[start + len('"private_key": "'):end]
               suffix = raw[end:]
-              raw = prefix + key.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '') + suffix
+              raw = prefix + key.replace('\r', '').replace('\n', '\\n') + suffix
           with open("service_account.json", "w", encoding="utf-8") as f:
               f.write(raw)
           PY
