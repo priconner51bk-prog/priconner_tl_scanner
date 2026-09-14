@@ -1,6 +1,5 @@
 """Conservative relevance scoring for Princess Connect videos."""
 
-import re
 import unicodedata
 
 MAX_DESCRIPTION_LENGTH = 5000
@@ -43,7 +42,7 @@ def relevance_score(video, boss_names=()):
     title = _normalize(getattr(video, "title", ""))
     description = _normalize(getattr(video, "description", ""))[:MAX_DESCRIPTION_LENGTH]
     tags = " ".join(_normalize(tag) for tag in getattr(video, "tags", ()) or ())
-    combined = " ".join((title, description, tags))
+    combined = f"{title} {description} {tags}"
     score = 0
     if _contains_any(combined, POSITIVE_GAME_TERMS):
         score += 4

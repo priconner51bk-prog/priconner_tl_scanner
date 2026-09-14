@@ -14,6 +14,7 @@ import discord_utils as discord
 import gspread_utils as gspread
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
+from tl_formatting import format_discord_tl
 
 DISCORD_API = "https://discord.com/api/v10"
 WAIT_TIME = 0
@@ -111,7 +112,7 @@ def extract_youtube_urls(message):
         value = attachment.get("url")
         if value:
             urls.update(YOUTUBE_URL_PATTERN.findall(value))
-    return sorted(_normalize_youtube_url(url) for url in urls)
+    return sorted({_normalize_youtube_url(url) for url in urls})
 
 
 def fetch_video_info(url):
@@ -209,7 +210,12 @@ def checkNewArrivalsForDiscordChannel(
                         "検出時刻": scan_time,
                     },
                 )
-                new_urls.append(url)
+                formatted_tl = ""
+                try:
+                    formatted_tl = format_discord_tl(message.get("content") or "")
+                except RuntimeError as error:
+                    print(f"警告: TLフォーマッタを利用できません: {error}")
+                new_urls.append((url, formatted_tl))
                 print(f"new: {url}")
         retry_sleep(wait_time)
 
@@ -217,11 +223,11 @@ def checkNewArrivalsForDiscordChannel(
         return
 
     sheet = gspread.getDamagesSheet().worksheet("Youtube")
-    gspread.writeToFirstEmptyCells(sheet, new_urls, wait_time=WAIT_TIME)
+    gspread.writeToFirstEmptyCells(sheet, [url for url, _ in new_urls], wait_time=WAIT_TIME)
 
-    for url in new_urls:
+    for url, formatted_tl in new_urls:
         try:
-            post(url)
+            post(f"{url}\n\n{formatted_tl}" if formatted_tl else url)
         except Exception as error:
             print(f"失敗: Discord URL通知 {url}: {error}")
         retry_sleep(wait_time)

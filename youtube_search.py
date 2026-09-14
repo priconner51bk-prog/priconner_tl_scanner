@@ -7,9 +7,10 @@ from yt_dlp import YoutubeDL
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
+from youtube_common import as_utc, write_urls_with_retry
+from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from video_relevance import is_relevant_video
-from new_arrivals_markdown import write_arrival
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
@@ -18,10 +19,15 @@ DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 50
 
 
-def _as_utc(value):
-    if value.tzinfo is None or value.utcoffset() is None:
-        return value.replace(tzinfo=datetime.JST).astimezone(timezone.utc)
-    return value.astimezone(timezone.utc)
+def _post_to_channel(post, text, channel_key):
+    try:
+        return post(text, channel_key=channel_key)
+    except TypeError:
+        # Keep compatibility with simple injected test callbacks.
+        return post(text)
+
+
+_as_utc = as_utc
 
 
 class YTDLPVideo:
@@ -43,15 +49,18 @@ class YTDLPVideo:
             else ""
         )
         timestamp = info.get("timestamp")
+        upload_date = info.get("upload_date")
         if timestamp is not None:
             self.publish_date = DateTime.fromtimestamp(timestamp, tz=timezone.utc)
+        elif upload_date:
+            try:
+                self.publish_date = DateTime.strptime(
+                    upload_date, "%Y%m%d"
+                ).replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                self.publish_date = None
         else:
-            upload_date = info.get("upload_date")
-            self.publish_date = (
-                DateTime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
-                if upload_date
-                else None
-            )
+            self.publish_date = None
 
 
 class YTDLPChannel:
@@ -69,15 +78,7 @@ class YTDLPChannel:
         self.channel_url = info.get("channel_url") or url
 
 
-def _write_urls_with_retry(write_urls, urls, sleep, retries=2):
-    for attempt in range(retries + 1):
-        try:
-            return write_urls(urls)
-        except Exception as error:
-            if attempt >= retries:
-                raise
-            print(f"URL登録を再試行します ({attempt + 1}/{retries}): {error}")
-            sleep(2**attempt)
+_write_urls_with_retry = write_urls_with_retry
 
 
 def search_youtube(query, now_factory=None):
@@ -178,7 +179,7 @@ def findYouTubeVideo(
     channel_values = []
     video_values = []
 
-    for bossName in bossNames:
+    for boss_index, bossName in enumerate(bossNames[:5], start=1):
         print(f"ボス名：{bossName}")
         keywords = f"{bossName} プリコネ"
 
@@ -241,7 +242,7 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append((videoUrl, videoTitle, f"対象ボス: {bossName}"))
+            pending_posts.append((videoUrl, videoTitle, f"対象ボス: {bossName}", f"boss{boss_index}_tl"))
 
         sleep(wait_time)
 
@@ -255,9 +256,9 @@ def findYouTubeVideo(
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
 
-    for videoUrl, videoTitle, notes in pending_posts:
+    for videoUrl, videoTitle, notes, channel_key in pending_posts:
         try:
-            post(f"動画タイトル: {videoTitle}\n備考: {notes}\n動画URL: {videoUrl}")
+            _post_to_channel(post, f"動画タイトル: {videoTitle}\n備考: {notes}\n動画URL: {videoUrl}", channel_key)
         except Exception as error:
             print(f"失敗: YouTube URL通知 {videoUrl}: {error}")
         sleep(wait_time)

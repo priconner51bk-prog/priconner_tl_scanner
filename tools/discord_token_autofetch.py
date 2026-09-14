@@ -17,7 +17,6 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 import time
 import urllib.request
 
@@ -109,8 +108,9 @@ def _validate(token):
 
 
 def _save_token(token):
-    import tools.discord_token_fetch as token_fetch
     from pathlib import Path
+
+    import tools.discord_token_fetch as token_fetch
     config_path = Path(dc.__file__).resolve().parent / "config.ini"
     return token_fetch._save_token(token, config_path)
 

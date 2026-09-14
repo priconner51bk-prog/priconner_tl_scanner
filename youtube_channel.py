@@ -7,8 +7,9 @@ from yt_dlp import YoutubeDL
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
-from runtime_utils import run_locked
+from youtube_common import as_utc, write_urls_with_retry
 from new_arrivals_markdown import write_arrival
+from runtime_utils import run_locked
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # Network calls are already rate limited by YouTube/Discord.  A four second
@@ -20,22 +21,10 @@ DEFAULT_PERIOD_DAYS = 7
 DEFAULT_CHANNEL_LIMIT = 20
 
 
-def _as_utc(value):
-    """Return a datetime that can safely be compared with UTC timestamps."""
-    if value.tzinfo is None or value.utcoffset() is None:
-        return value.replace(tzinfo=datetime.JST).astimezone(timezone.utc)
-    return value.astimezone(timezone.utc)
+_as_utc = as_utc
 
 
-def _write_urls_with_retry(write_urls, urls, sleep, retries=2):
-    for attempt in range(retries + 1):
-        try:
-            return write_urls(urls)
-        except Exception as error:
-            if attempt >= retries:
-                raise
-            print(f"URL登録を再試行します ({attempt + 1}/{retries}): {error}")
-            sleep(2**attempt)
+_write_urls_with_retry = write_urls_with_retry
 
 
 class YTDLPVideo:

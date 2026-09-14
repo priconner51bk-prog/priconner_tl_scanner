@@ -1,0 +1,19 @@
+﻿line-length = 100
+
+[lint.per-file-ignores]
+# Broad-exception catches are an intentional resilience design: one stage's
+# network failure must not abort the whole monitor run. See README.
+"discord_channel.py" = ["BLE001"]
+"worrychefs.py" = ["BLE001"]
+"youtube_channel.py" = ["BLE001"]
+"youtube_search.py" = ["BLE001"]
+"tools/discord_token_autofetch.py" = ["BLE001"]
+# Naive datetimes are intentional for local/scheduling logic and tests.
+"scheduled_monitor.py" = ["DTZ011"]
+"tests/test_safety.py" = ["DTZ001", "RUF012"]
+"tests/test_datetime_utils.py" = ["DTZ001"]
+"tests/test_runtime_state.py" = ["DTZ001"]
+# Fixed-format ISO parse is immediately tagged as UTC.
+"datetime_utils.py" = ["DTZ007"]
+# The alias shadows the stdlib datetime module on purpose.
+"sheets_maintenance.py" = ["PLC0414"]

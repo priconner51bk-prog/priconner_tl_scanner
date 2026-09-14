@@ -8,7 +8,6 @@ GET /users/@me, tests a sample channel fetch, and writes the token
 into [discord_channel] token= in config.ini when valid.
 """
 
-import sys
 from pathlib import Path
 
 import requests

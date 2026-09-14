@@ -7,12 +7,14 @@ damages_spreadsheet_id=id
 webhook_url=url
 timeout=10
 retries=2
+api_interval=1.0
 
 [discord_channel]
 token=
-guild_id=883641935175233646
-channel_ids=888411637185388585
+guild_id=
+channel_ids=
 limit=100
+tl_formatter_path=
 
 [youtube]
 period_days=7

@@ -16,9 +16,9 @@ def string2DateTime(str):
     return dateTime.astimezone(timezone.utc)
 
 
-def isoString2DateTime(str):
-    dateTime = datetime.strptime(str, DATE_FORMAT_ISO)
-    return dateTime.astimezone(timezone.utc)
+def isoString2DateTime(value):
+    dateTime = datetime.strptime(value, DATE_FORMAT_ISO)
+    return dateTime.replace(tzinfo=timezone.utc)
 
 
 def calcDate(datetime, days):

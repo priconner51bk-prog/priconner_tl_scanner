@@ -1,12 +1,12 @@
 """Run the scheduled monitoring stages and persist non-secret runtime state."""
 
 import argparse
-from configparser import ConfigParser
 import json
 import os
 import subprocess
 import sys
 import tempfile
+from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path
 

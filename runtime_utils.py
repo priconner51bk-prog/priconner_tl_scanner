@@ -24,8 +24,8 @@ def default_runtime_dir():
         return Path(configured_runtime_dir).expanduser()
     state_home = os.environ.get("XDG_STATE_HOME")
     if state_home:
-        return Path(state_home) / "priconner-tl-movie-scanner"
-    return Path.home() / ".local" / "state" / "priconner-tl-movie-scanner"
+        return Path(state_home) / "priconner-tl-scanner"
+    return Path.home() / ".local" / "state" / "priconner-tl-scanner"
 
 
 @contextmanager

@@ -3,5 +3,7 @@ gspread
 oauth2client
 yt-dlp[default]
 requests
+google-api-python-client
+google-auth
 ruff
 websocket-client
