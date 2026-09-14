@@ -1,5 +1,6 @@
 import re
 import time
+import os
 import hashlib
 import io
 import csv
@@ -45,8 +46,6 @@ TL_HEADERS = [
     "種別", "元シートURL",
 ]
 
-_CHARACTER_MASTER_URL = "https://docs.google.com/spreadsheets/d/REMOVED_SPREADSHEET_ID/export"
-_CHARACTER_MASTER_GID = "REMOVED_GID"
 _character_aliases_cache = None
 
 
@@ -55,9 +54,15 @@ def _load_character_aliases():
     global _character_aliases_cache
     if _character_aliases_cache is not None:
         return _character_aliases_cache
+    spreadsheet_id = os.environ.get("CHARACTER_MASTER_SPREADSHEET_ID", "").strip()
+    gid = os.environ.get("CHARACTER_MASTER_GID", "").strip()
+    if not spreadsheet_id or not gid:
+        raise RuntimeError(
+            "CHARACTER_MASTER_SPREADSHEET_ID and CHARACTER_MASTER_GID are required"
+        )
     response = requests.get(
-        _CHARACTER_MASTER_URL,
-        params={"format": "csv", "gid": _CHARACTER_MASTER_GID},
+        f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export",
+        params={"format": "csv", "gid": gid},
         timeout=30,
     )
     response.raise_for_status()
