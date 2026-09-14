@@ -56,9 +56,6 @@ jobs:
           PY
           printf '%s' "$DISCORD_CHANNELS_JSON_CONTENT" > discord_channels.json
 
-      - name: Record Actions heartbeat
-        run: python actions_heartbeat.py
-
       - name: Run monitor
         run: python monitor_runner.py
 
