@@ -219,6 +219,7 @@ __marimo__/
 *.json
 config.ini
 SECRET_INVENTORY.local.md
+secrets.local.json
 # Runtime output artifacts
 7/
 _docs_cli.html
