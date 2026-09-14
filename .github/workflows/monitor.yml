@@ -37,10 +37,22 @@ jobs:
 
       - name: Write temporary credentials
         env:
-          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DISCORD_CHANNELS_JSON_CONTENT: ${{ secrets.DISCORD_CHANNELS_JSON }}
         run: |
-          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 --decode > service_account.json
+          python - <<'PY'
+          import os
+          raw = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT"]
+          start = raw.find('"private_key": "')
+          end = raw.find('",\n  "client_email"', start)
+          if start >= 0 and end >= 0:
+              prefix = raw[:start + len('"private_key": "')]
+              key = raw[start + len('"private_key": "'):end]
+              suffix = raw[end:]
+              raw = prefix + key.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '') + suffix
+          with open("service_account.json", "w", encoding="utf-8") as f:
+              f.write(raw)
+          PY
           printf '%s' "$DISCORD_CHANNELS_JSON_CONTENT" > discord_channels.json
 
       - name: Run monitor
