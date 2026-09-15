@@ -47,6 +47,8 @@ TL_HEADERS = [
 ]
 
 _character_aliases_cache = None
+_formation_labels_cache = {}
+_formation_source_labels = {}
 
 
 def _load_character_aliases():
@@ -113,7 +115,14 @@ def _translate_sheet_character_names(text):
 def format_tl_text(text):
     """Resolve sheet abbreviations and apply the optional TL formatter."""
     try:
-        text = _translate_sheet_character_names(text)
+        # Translate only action rows.  Untimed notes such as ``Tell:`` and
+        # parenthesized explanations must retain their original wording.
+        text = "\n".join(
+            _translate_sheet_character_names(line)
+            if re.match(r"^\s*\d{1,3}:\d{2}\b", line)
+            else line
+            for line in text.splitlines()
+        )
     except (requests.RequestException, RuntimeError, KeyError, ValueError):
         pass
     # The published sheet writes formation masks as ``OOXOX, Auto ON``.
@@ -147,14 +156,29 @@ def formation_image_urls(html, code=None):
             rowspan = max(1, int(cell.get("rowspan", 1)))
             value = cell.get_text(" ", strip=True)
             images = [img.get("src") for img in cell.find_all("img") if img.get("src")]
+            sibling_labels = [s.get_text(" ", strip=True) for s in cell.find_next_siblings("td", recursive=False)[:5]]
+            if images and sibling_labels:
+                for image in images:
+                    _formation_source_labels[image] = sibling_labels
             for rr in range(r, r + rowspan):
                 for cc in range(c, c + colspan):
                     grid[(rr, cc)] = (value if rr == r and cc == c else "", images if rr == r and cc == c else [])
-            if value and re.fullmatch(r"D[1-5]\d{1,2}", value):
+            # simple/manual uses D503, while overtime uses D3T05.
+            # Both formats identify a TL panel header and must be usable
+            # when locating the panel's five formation portraits.
+            if value and (_D_CODE.fullmatch(value) or _OT_CODE.fullmatch(value)):
                 header_codes.append((r, c, value))
                 if value == code and code_position is None:
                     code_position = (r, c)
             c += colspan
+    # Image cells span two columns; the five original character names are
+    # placed immediately to their right on the same row.
+    for (rr, cc), (_, image_list) in list(grid.items()):
+        if image_list:
+            labels = [grid.get((rr, cc + 2 + i), ("", []))[0].strip()
+                      for i in range(5)]
+            for image in image_list:
+                _formation_source_labels[image] = labels
     if code_position is None:
         return []
     start_row, start_col = code_position
@@ -166,28 +190,93 @@ def formation_image_urls(html, code=None):
     candidates = []
     for row in range(start_row, end_row):
         imgs = []
+        labels = []
         seen = set()
         for col in range(start_col, end_col):
-            for src in grid.get((row, col), ("", []))[1]:
+            cell_images = grid.get((row, col), ("", []))[1]
+            for src in cell_images:
                 if src not in seen:
                     imgs.append(src)
+                    # Character names are usually in the row immediately
+                    # below the portrait; use the original sheet text.
+                    source_labels = _formation_source_labels.get(src, [])
+                    label = source_labels[len(labels)] if len(labels) < len(source_labels) else ""
+                    labels.append(label)
                     seen.add(src)
         if len(imgs) >= 5:
-            candidates.append(imgs)
+            candidates.append((imgs, labels))
     if not candidates:
         return []
     # The source row may contain one boss portrait followed by five characters.
-    return candidates[max(range(len(candidates)), key=lambda i: len(candidates[i]))][-5:]
+    best_images, best_labels = candidates[max(range(len(candidates)), key=lambda i: len(candidates[i][0]))]
+    result = best_images[-5:]
+    best_labels = best_labels[-5:]
+    # Keep the source image alt text for 404 placeholders.  This is the
+    # original sheet name, before character-name translation.
+    # Resolve labels from the row immediately preceding the portrait row.
+    # Google Sheets publishes portrait cells with rowspan, so grid-relative
+    # neighbours can point at stats or notes instead of formation names.
+    source_rows = soup.find_all("tr")
+    resolved_labels = []
+    for src, fallback in zip(result, best_labels):
+        label = fallback
+        image_tag = soup.find("img", src=src)
+        image_row = image_tag.find_parent("tr") if image_tag else None
+        if image_row in source_rows:
+            row_index = source_rows.index(image_row)
+            row_images = [img.get("src") for img in image_row.find_all("img")]
+            image_index = row_images.index(src) - max(0, len(row_images) - 5)
+            for prior in reversed(source_rows[max(start_row, row_index - 4):row_index]):
+                values = [c.get_text(" ", strip=True) for c in prior.find_all(["td", "th"], recursive=False)]
+                time_index = next(
+                    (i for i, value in enumerate(values)
+                     if re.fullmatch(r"\d{1,3}:\d{2}", value)),
+                    None,
+                )
+                before_time = values[:time_index] if time_index is not None else values
+                names = [v for v in before_time
+                         if v and not re.fullmatch(
+                             r"(?:\d[\d-]*|\d{1,3}:\d{2}|MAX(?:/\d+)?|UE|CR)",
+                             v, re.I)]
+                if len(names) >= 5:
+                    label = names[max(0, min(image_index, len(names) - 1))]
+                    break
+        resolved_labels.append(label)
+    _formation_labels_cache[tuple(result)] = resolved_labels
+    return result
 
 
 def combined_formation_image(urls, http_get=requests.get):
     """Download five portraits and return one horizontal PNG file object."""
     from PIL import Image
+    from PIL import ImageDraw
     portraits = []
-    for url in urls[:5]:
-        response = http_get(url, timeout=10)
-        response.raise_for_status()
-        portraits.append(Image.open(io.BytesIO(response.content)).convert("RGB").resize((128, 128)))
+    labels = _formation_labels_cache.get(tuple(urls), [""] * len(urls))
+    for index, url in enumerate(urls[:5]):
+        candidates = [url]
+        if "=" in url:
+            base = url.rsplit("=", 1)[0]
+            candidates.extend([base + "=s256", base + "=w256-h256", base])
+        loaded = None
+        last_error = None
+        for candidate in candidates:
+            try:
+                response = http_get(candidate, timeout=10)
+                response.raise_for_status()
+                loaded = Image.open(io.BytesIO(response.content)).convert("RGB").resize((128, 128))
+                break
+            except Exception as error:
+                last_error = error
+        if loaded is None:
+            # A stale Google image URL must not remove the whole formation.
+            # Keep the slot so the five-character layout remains aligned.
+            print(f"警告: 編成画像の代替URLも失敗、白画像で補完: {last_error}")
+            loaded = Image.new("RGB", (128, 128), "white")
+            label = labels[index] if index < len(labels) else ""
+            if label:
+                draw = ImageDraw.Draw(loaded)
+                draw.text((4, 54), label, fill="black")
+        portraits.append(loaded)
     if len(portraits) < 5:
         return None
     output = Image.new("RGB", (640, 128), "white")
@@ -197,6 +286,82 @@ def combined_formation_image(urls, http_get=requests.get):
     output.save(stream, format="PNG")
     stream.seek(0)
     return stream
+
+
+def formation_info_md(html, code, manual_layout=False):
+    """Extract formation data inside the target TL panel only."""
+    soup = BeautifulSoup(html, "html.parser")
+    trs = soup.find_all("tr")
+    grid = {}
+    headers = []
+    for r, row in enumerate(trs):
+        col = 0
+        for cell in row.find_all(["td", "th"], recursive=False):
+            while (r, col) in grid:
+                col += 1
+            colspan = int(cell.get("colspan", 1) or 1)
+            rowspan = int(cell.get("rowspan", 1) or 1)
+            value = cell.get_text(" ", strip=True)
+            for rr in range(r, r + rowspan):
+                for cc in range(col, col + colspan):
+                    grid[(rr, cc)] = value if rr == r and cc == col else ""
+            if value and value == code:
+                headers.append((r, col))
+            col += colspan
+    if not headers:
+        return ""
+    start_row, start_col = headers[0]
+    same_row = sorted(c for r, c in headers if r == start_row)
+    later = [c for c in same_row if c > start_col]
+    end_col = later[0] if later else max(c for (r, c) in grid if r == start_row) + 1
+    # Read only until the next header row for the same panel position.
+    next_header = next((r for r in range(start_row + 1, len(trs))
+                        if grid.get((r, start_col), "") and
+                        re.fullmatch(r"D[1-5](?:T\d{2}|\d{1,2})", grid[(r, start_col)])), len(trs))
+    names = []
+    info = {"⚔️": [], "⭐": [], "UE": []}
+    for r in range(start_row + 1, next_header):
+        values = [grid.get((r, c), "").strip() for c in range(start_col, end_col)]
+        time_index = next((i for i, v in enumerate(values) if re.fullmatch(r"\d{1,3}:\d{2}", v)), None)
+        if not names and manual_layout:
+            candidate = values[1:6] if len(values) >= 6 else []
+        elif not names and time_index is not None and time_index >= 5:
+            candidate = values[time_index - 5:time_index]
+        else:
+            candidate = []
+        if not names and len(candidate) == 5:
+            if all(candidate) and not any(re.search(r"Author|Transcribed|Duration|EV/OT", v, re.I) for v in candidate):
+                names = candidate
+        for marker in info:
+            if marker in values:
+                i = values.index(marker)
+                candidate = [v for v in values[i + 1:i + 6]]
+                if len(candidate) == 5:
+                    info[marker] = candidate
+    if len(names) != 5:
+        return ""
+    # Sheets display the formation left-to-right; posts require right-to-left.
+    names = list(reversed(names))
+    for marker in info:
+        info[marker] = list(reversed(info[marker])) if len(info[marker]) == 5 else [""] * 5
+    lines = ["編成情報", "", "キャラ名       ⚔️     ⭐     UE"]
+    lines.extend(f"{name:<14} {info['⚔️'][i]:<5} {info['⭐'][i]:<5} {info['UE'][i]}"
+                 for i, name in enumerate(names))
+    return "\n".join(lines)
+
+
+def set_state_md(text):
+    """Render SET masks as a compact O/X row in the post."""
+    masks = re.findall(r"\[([54321-]{5})\]", text)
+    if not masks:
+        return ""
+    rows = ["SET状態", "", "時刻      状態"]
+    for line in text.splitlines():
+        match = re.search(r"(\d{1,3}:\d{2}).*?\[([54321-]{5})\]", line)
+        if match:
+            state = "".join("○" if char != "-" else "×" for char in match.group(2))
+            rows.append(f"{match.group(1):<9} {state}")
+    return "\n".join(rows) if len(rows) > 3 else ""
 
 
 def load_worrychefs_sources(path=None):
@@ -233,6 +398,9 @@ def collect_worrychefs_records(sources, http_get=requests.get, timeout=10,
             block["canonical"] = canonicalize_tl(block["text"])
             block["hash"] = tl_hash(block["text"])
             block["image_urls"] = formation_image_urls(html, block["code"]) if html else []
+            block["formation_md"] = formation_info_md(
+                html, block["code"], manual_layout=source["name"].startswith("manual")
+            ) if html else ""
             block["key"] = f"{source['name']}:{block['code']}"
             block["url"] = url
             block["author"] = _source_author(rows, block["code"])
@@ -325,7 +493,8 @@ def save_record_changes(sheet, header, inserts, updates):
 
 def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
                                format_time=datetime.dateTime2String,
-                               reset_discord=False, target_code="D503", source_kind=None):
+                               reset_discord=False, target_code="D503", source_kind=None,
+                               force_post=False):
     """Collect configured WorryChefs sheets, persist diffs, and route Bot posts."""
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheet = ss.worksheet("WorryChefs TL")
@@ -340,13 +509,15 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
         save_record_changes(sheet, header, inserts, updates)
     # 通常時はシート上のハッシュで重複投稿を防止する。
     # Discord投稿を削除して再構築するリセット時だけD503を強制投稿する。
-    if reset_discord:
+    if reset_discord or force_post:
         changed_keys = {record["key"] for record in records
-                        if (source_kind is None or record.get("source") == source_kind)
+                        if (source_kind is None or record.get("source") == source_kind
+                            or (source_kind == "manual" and str(record.get("source", "")).startswith("manual-")))
                         and (target_code is None or str(record.get("code", "")).strip().upper() == target_code)}
     else:
         changed_keys = {record["key"] for record in records
-                        if (source_kind is None or record.get("source") == source_kind)
+                        if (source_kind is None or record.get("source") == source_kind
+                            or (source_kind == "manual" and str(record.get("source", "")).startswith("manual-")))
                         and (target_code is None or str(record.get("code", "")).strip().upper() == target_code)
                         and record.get("status") in {"new", "updated"}}
     for record in records:
@@ -360,7 +531,12 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
                    f"参照スプシ: [シートを開く]({record['url']})\n"
                    f"制作者: {record.get('author') or '不明'}\n"
                    f"ダメージ: {record['damage'] or '未記入'}\n\n"
-                   f"```md\n{record['text']}\n```")
+                   f"```scm\n{record['text']}\n```")
+        if record.get("formation_md"):
+            content += f"\n\n```text\n{record['formation_md']}\n```"
+        set_md = ""
+        if set_md:
+            content += f"\n\n```text\n{set_md}\n```"
         image = None
         try:
             image = combined_formation_image(record.get("image_urls", []))
@@ -385,10 +561,11 @@ def _format_manual_row(row):
     action = row[3].strip() if len(row) > 3 else ""
     # Columns 2..6 are SET/OFF state in the five formation positions.
     if unit == "SET" and len(row) >= 7:
-        mask = "".join(pos if value == "SET" else "-" for pos, value in zip("54321", row[2:7]))
+        state = "".join("O" if value.strip().upper() == "SET" else "X"
+                        for value in row[2:7])
         auto = row[7:9]
         suffix = "🅰️OFF" if auto == ["Auto", "OFF"] else ""
-        return f"{time_value} [{mask}]{suffix}".strip()
+        return f"{time_value} {state} {suffix}".strip()
     return " ".join(part for part in (time_value, unit, action) if part)
 
 
@@ -430,6 +607,12 @@ def extract_tl_blocks(rows, source_kind="simple"):
                         if re.fullmatch(r"\d{1,2}:\d{2}", cell) and action:
                             lines.append(f"{cell} {action}")
         text = "\n".join(lines)
+        # Manual sheets contain empty boss panels with only an initial SET
+        # row.  They are not TLs and must not be posted.
+        if source_kind.startswith("manual") and lines and not any(
+                not re.fullmatch(r"\s*\d{1,3}:\d{2}\s+[OX]{5}(?:\s+🅰️(?:ON|OFF))?\s*", line)
+                for line in lines):
+            continue
         if lines:
             blocks.append({"code": code, "source": source_kind, "damage": damage,
                            "text": text, "canonical": canonicalize_tl(text),
@@ -488,6 +671,7 @@ def _extract_overtime_blocks(rows, source_kind, code_pattern=_OT_CODE):
                 match = _DAMAGE.search(value)
                 if match and not damage:
                     damage = match.group(0)
+            row_had_time = False
             for pos, value in enumerate(cells):
                 if left + pos < time_column:
                     continue
@@ -501,6 +685,7 @@ def _extract_overtime_blocks(rows, source_kind, code_pattern=_OT_CODE):
                                 else r"\d{1,2}:\d{2}")
                 if not re.fullmatch(time_pattern, value):
                     continue
+                row_had_time = True
                 actions = []
                 for candidate in cells[pos + 1:]:
                     candidate = candidate.strip()
@@ -520,6 +705,17 @@ def _extract_overtime_blocks(rows, source_kind, code_pattern=_OT_CODE):
                         continue
                     t = value if ":" in value else f"0:{int(value):02d}"
                     lines.append(f"{t} {action}")
+            # Keep untimed TL continuation/comment rows.  Parenthesized notes
+            # such as "(tell ...)" are part of the instructions, not
+            # formation metadata, and must not be discarded.
+            if not row_had_time:
+                continuation = next(
+                    (value.strip() for value in cells[time_column:]
+                     if value.strip().startswith(("(", "（", "Tell:", "tell:"))),
+                    "",
+                )
+                if continuation:
+                    lines.append(continuation)
         if lines:
             lines = list(dict.fromkeys(lines))
             text = "\n".join(lines)
@@ -735,14 +931,17 @@ def main():
 
         import sys
         reset = "--reset-posts" in sys.argv
+        force = "--force" in sys.argv
         target = "D503"
         source = None
         if "--code" in sys.argv:
             target = sys.argv[sys.argv.index("--code") + 1].strip().upper()
         if "--source" in sys.argv:
             source = sys.argv[sys.argv.index("--source") + 1].strip().lower()
-            target = None
-        scan_configured_worrychefs(reset_discord=reset, target_code=target, source_kind=source)
+            if "--code" not in sys.argv:
+                target = None
+        scan_configured_worrychefs(reset_discord=reset, target_code=target,
+                                   source_kind=source, force_post=force)
 
         print("-----------------------------------------------")
         print(f"終了{datetime.nowString()}")
