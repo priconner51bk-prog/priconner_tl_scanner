@@ -1,6 +1,7 @@
 """Scrape YouTube links from configured Discord server channels."""
 
 import os
+import hashlib
 import re
 import time
 from datetime import datetime as DateTime
@@ -172,6 +173,9 @@ def checkNewArrivalsForDiscordChannel(
     scan_time = datetime.dateTime2String(now_factory())
 
     known_urls = set(gspread.getDamagesSheet().worksheet("Youtube").col_values(1))
+    tracking = gspread.getNewArrivalsSheet().worksheet("Discordスキャン")
+    tracking_rows = tracking.get_all_values()
+    tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
     new_urls = []
 
     for channel_id in channel_ids:
@@ -216,8 +220,20 @@ def checkNewArrivalsForDiscordChannel(
                     formatted_tl = format_discord_tl(message.get("content") or "")
                 except RuntimeError as error:
                     print(f"警告: TLフォーマッタを利用できません: {error}")
+                comparison = formatted_tl or title
+                digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
+                old = tracking_by_url.get(url)
+                status = "new" if not old else ("updated" if len(old[1]) < 3 or old[1][2] != digest else "same")
+                if status == "same":
+                    continue
+                previous = old[1][1] if old and len(old[1]) > 1 else ""
+                row = [url, comparison, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
+                if old:
+                    tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
+                else:
+                    tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
                 body = f"{url}\n\n{formatted_tl}" if formatted_tl else url
-                new_urls.append({"url": url, "text": body, "status": "new"})
+                new_urls.append({"url": url, "text": body, "status": status, "previous_text": previous})
                 print(f"new: {url}")
         retry_sleep(wait_time)
 
