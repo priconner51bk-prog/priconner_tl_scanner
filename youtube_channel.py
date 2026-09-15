@@ -1,4 +1,5 @@
 import time
+import os
 from datetime import datetime as DateTime
 from datetime import timezone
 
@@ -6,8 +7,9 @@ from yt_dlp import YoutubeDL
 
 import datetime_utils as datetime
 import discord_utils as discord
+import post_change_tracker as post_tracker
 import gspread_utils as gspread
-from youtube_common import as_utc, write_urls_with_retry
+from youtube_common import as_utc, write_urls_with_retry, video_post_body, VIDEO_HEADERS
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 
@@ -171,6 +173,7 @@ def checkNewArrivalsForYouTube(
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     videoUrls = sheetVideo.col_values(5)
     known_video_urls = set(videoUrls)
+    video_rows = {row[4]: (index, row) for index, row in enumerate(sheetVideo.get_all_values()[1:], start=2) if len(row) > 4 and row[4]}
     rows = sheetChannel.get_all_values()
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
@@ -230,6 +233,14 @@ def checkNewArrivalsForYouTube(
                 print(f"videoUrl:{videoUrl}")
 
                 if videoUrl in known_video_urls:
+                    old = video_rows.get(videoUrl)
+                    if old and len(old[1]) > 3 and old[1][3] != yt.title:
+                        previous = video_post_body(old[1][3], "登録チャンネルの新着動画", videoUrl)
+                        row = list(old[1]) + [""] * max(0, 6 - len(old[1]))
+                        row[3], row[5] = yt.title, previous
+                        if hasattr(sheetVideo, "update"):
+                            sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの動画更新", "status": "updated", "previous_text": previous})
                     # Entries are newest first. Once a known entry is reached,
                     # older entries cannot produce a new result.
                     stop_channel = True
@@ -272,7 +283,7 @@ def checkNewArrivalsForYouTube(
 
                 count += 1
                 damage_urls.append(videoUrl)
-                pending_posts.append((videoUrl, yt.title, "登録チャンネルの新着動画"))
+                pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの新着動画", "status": "new"})
 
             if stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT:
                 break
@@ -303,11 +314,14 @@ def checkNewArrivalsForYouTube(
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
 
-    for videoUrl, videoTitle, notes in pending_posts:
+    for item in pending_posts:
+        if os.environ.get("PRICONNER_NO_POST"):
+            continue
         try:
-            post(f"動画タイトル: {videoTitle}\n備考: {notes}\n動画URL: {videoUrl}")
+            body = video_post_body(item['title'], item['notes'], item['url'])
+            post(post_tracker.post_content({**item, "text": body}))
         except Exception as error:
-            print(f"失敗: YouTube URL通知 {videoUrl}: {error}")
+            print(f"失敗: YouTube URL通知 {item['url']}: {error}")
         sleep(wait_time)
 
     if count > 0:

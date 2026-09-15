@@ -25,3 +25,10 @@ def write_urls_with_retry(write_urls, urls, sleep=time.sleep, retries=2):
 
 def unique_urls(urls):
     return list(dict.fromkeys(url for url in urls if url))
+
+
+VIDEO_HEADERS = ["チャンネル名", "チャンネルURL", "投稿日", "動画タイトル", "動画URL", "投稿直前本文"]
+
+
+def video_post_body(title, notes, url):
+    return f"動画タイトル: {title}\n備考: {notes}\n動画URL: {url}"

@@ -12,6 +12,7 @@ from yt_dlp import YoutubeDL
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
+import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from tl_formatting import format_discord_tl
@@ -215,7 +216,8 @@ def checkNewArrivalsForDiscordChannel(
                     formatted_tl = format_discord_tl(message.get("content") or "")
                 except RuntimeError as error:
                     print(f"警告: TLフォーマッタを利用できません: {error}")
-                new_urls.append((url, formatted_tl))
+                body = f"{url}\n\n{formatted_tl}" if formatted_tl else url
+                new_urls.append({"url": url, "text": body, "status": "new"})
                 print(f"new: {url}")
         retry_sleep(wait_time)
 
@@ -223,13 +225,15 @@ def checkNewArrivalsForDiscordChannel(
         return
 
     sheet = gspread.getDamagesSheet().worksheet("Youtube")
-    gspread.writeToFirstEmptyCells(sheet, [url for url, _ in new_urls], wait_time=WAIT_TIME)
+    gspread.writeToFirstEmptyCells(sheet, [item["url"] for item in new_urls], wait_time=WAIT_TIME)
 
-    for url, formatted_tl in new_urls:
+    for item in new_urls:
+        if os.environ.get("PRICONNER_NO_POST"):
+            continue
         try:
-            post(f"{url}\n\n{formatted_tl}" if formatted_tl else url)
+            post(post_tracker.post_content(item))
         except Exception as error:
-            print(f"失敗: Discord URL通知 {url}: {error}")
+            print(f"失敗: Discord URL通知 {item['url']}: {error}")
         retry_sleep(wait_time)
 
     try:

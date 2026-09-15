@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
+import post_change_tracker as post_tracker
 from public_sheet_export import fetch_public_sheet
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
@@ -43,7 +44,7 @@ def tl_hash(text):
 
 TL_HEADERS = [
     "TLキー", "TL本文", "TLハッシュ", "新規検出日時", "更新検出日時",
-    "種別", "元シートURL",
+    "種別", "元シートURL", "投稿直前本文",
 ]
 
 _character_aliases_cache = None
@@ -91,6 +92,12 @@ def initialize_character_aliases():
 def _translate_sheet_character_names(text):
     """Translate TL English tokens by partial-matching characters.name_en."""
     aliases = _load_character_aliases()
+    text = re.sub(r"\bBoss\b", "ボス", text, flags=re.IGNORECASE)
+    protected = []
+    def protect(match):
+        protected.append(match.group(0))
+        return f"__TL_NOTE_{len(protected) - 1}__"
+    text = re.sub(r"\([^()]*\)", protect, text)
     for token in sorted(set(re.findall(r"(?<![A-Za-z])[A-Za-z][A-Za-z-]{2,}(?![A-Za-z])", text)), key=len, reverse=True):
         token_lower = token.lower()
         matches = []
@@ -98,7 +105,7 @@ def _translate_sheet_character_names(text):
             name_lower = name.lower()
             # WorryChefs prefixes short names, e.g. NYPeco/BNephi/GGMugi.
             # Match the longest meaningful contiguous fragment of name_en.
-            if name_lower in token_lower or token_lower in name_lower:
+            if name_lower == token_lower or (len(token_lower) >= 4 and name_lower in token_lower):
                 matches.append((len(name_lower), name))
                 continue
             fragments = [name_lower[index:index + size]
@@ -109,6 +116,8 @@ def _translate_sheet_character_names(text):
         if matches:
             name = max(matches)[1]
             text = re.sub(rf"(?<![A-Za-z]){re.escape(token)}(?![A-Za-z])", aliases[name], text)
+    for index, note in enumerate(protected):
+        text = text.replace(f"__TL_NOTE_{index}__", note)
     return text
 
 
@@ -404,6 +413,10 @@ def collect_worrychefs_records(sources, http_get=requests.get, timeout=10,
             block["key"] = f"{source['name']}:{block['code']}"
             block["url"] = url
             block["author"] = _source_author(rows, block["code"])
+            block["comparison_text"] = post_tracker.comparison_text(
+                block["text"], block.get("formation_md"), block.get("author"), block.get("damage")
+            )
+            block["hash"] = tl_hash(block["comparison_text"])
             records.append(block)
     return records
 
@@ -446,6 +459,7 @@ def compare_tl_records(rows, records):
             record["status"] = "new"
         elif old[2] != record["hash"]:
             record["status"] = "updated"
+            record["previous_text"] = old[1] if len(old) > 1 else ""
         else:
             continue
         if old and len(old) > 3:
@@ -458,8 +472,9 @@ def record_to_row(record, detected_at, existing_row=None):
     """Build the WorryChefs TL sheet row, preserving the original detect time."""
     first_seen = existing_row[3] if existing_row and len(existing_row) > 3 and existing_row[3] else detected_at
     updated = detected_at if existing_row else ""
+    previous = record.get("previous_text", "") if existing_row else ""
     return [record["key"], record["text"], record["hash"], first_seen, updated,
-            record["source"], record["url"]]
+            record["source"], record["url"], previous]
 
 
 def prepare_sheet_changes(sheet_rows, records, detected_at):
@@ -477,16 +492,26 @@ def prepare_sheet_changes(sheet_rows, records, detected_at):
             updates.append((old[0], new_row))
         else:
             inserts.append(new_row)
-    header = rows[0] if rows and len(rows[0]) >= len(TL_HEADERS) else TL_HEADERS
+    header = list(rows[0]) if rows and len(rows[0]) >= 7 else list(TL_HEADERS)
+    if "投稿直前本文" not in header:
+        header.append("投稿直前本文")
+    for _, row in updates:
+        while len(row) < len(header):
+            row.append("")
+    for row in inserts:
+        while len(row) < len(header):
+            row.append("")
     return header, inserts, updates
 
 
 def save_record_changes(sheet, header, inserts, updates):
     """Persist prepared changes using gspread's range update primitives."""
     if not sheet.get_all_values() or sheet.get_all_values()[0] != header:
-        sheet.update("A1:G1", [header], value_input_option="USER_ENTERED")
+        end_col = chr(ord("A") + len(header) - 1)
+        sheet.update(f"A1:{end_col}1", [header], value_input_option="USER_ENTERED")
     for row_number, row in updates:
-        sheet.update(f"A{row_number}:G{row_number}", [row], value_input_option="USER_ENTERED")
+        end_col = chr(ord("A") + len(header) - 1)
+        sheet.update(f"A{row_number}:{end_col}{row_number}", [row], value_input_option="USER_ENTERED")
     if inserts:
         sheet.insert_rows(inserts, row=2, value_input_option="USER_ENTERED")
 
@@ -521,17 +546,20 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
                         and (target_code is None or str(record.get("code", "")).strip().upper() == target_code)
                         and record.get("status") in {"new", "updated"}}
     for record in records:
-        if record["key"] not in changed_keys:
+        if os.environ.get("PRICONNER_NO_POST"):
             continue
         if record["key"] not in changed_keys:
             continue
+        if record["key"] not in changed_keys:
+            continue
+        post_text = post_tracker.post_content(record)
         content = (f"[WorryChefs更新] {record['code']} ({record['source']})\n"
                    f"新規投稿日時: {record.get('first_seen', detected_at)}\n"
                    f"更新検知日時: {detected_at if record.get('status') == 'updated' else ''}\n"
                    f"参照スプシ: [シートを開く]({record['url']})\n"
                    f"制作者: {record.get('author') or '不明'}\n"
                    f"ダメージ: {record['damage'] or '未記入'}\n\n"
-                   f"```scm\n{record['text']}\n```")
+                   f"```scm\n{post_text}\n```")
         if record.get("formation_md"):
             content += f"\n\n```text\n{record['formation_md']}\n```"
         set_md = ""
@@ -550,11 +578,11 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
     return records
 
 
-def _format_manual_row(row):
+def _format_manual_row(row, inherited_time=""):
     """Convert a Manual sheet row to formatter input."""
-    if len(row) < 3 or not _TIME.fullmatch(row[1]):
+    if len(row) < 3 or (not _TIME.fullmatch(row[1]) and not inherited_time):
         return ""
-    time_value = row[1]
+    time_value = row[1] if _TIME.fullmatch(row[1]) else inherited_time
     if time_value.isdigit():
         time_value = f"0:{int(time_value):02d}"
     unit = row[2].strip()
@@ -566,7 +594,15 @@ def _format_manual_row(row):
         auto = row[7:9]
         suffix = "🅰️OFF" if auto == ["Auto", "OFF"] else ""
         return f"{time_value} {state} {suffix}".strip()
-    return " ".join(part for part in (time_value, unit, action) if part)
+    states = [match.group(0) for value in row[4:]
+              for match in re.finditer(r"[OX〇○◯×☓]{5}", value.strip(), re.IGNORECASE)]
+    state_text = " / ".join(
+        "".join("○" if value.upper() in {"O", "〇", "○", "◯"} else "×" for value in state)
+        for state in states
+    )
+    if not unit and not action and not state_text:
+        return ""
+    return " ".join(part for part in (time_value, unit, action, state_text) if part)
 
 
 def extract_tl_blocks(rows, source_kind="simple"):
@@ -581,8 +617,14 @@ def extract_tl_blocks(rows, source_kind="simple"):
         end = starts[index + 1][0] if index + 1 < len(starts) else len(rows)
         block_rows = rows[start:end]
         if source_kind.startswith("manual"):
-            lines = [_format_manual_row(row) for row in block_rows]
-            lines = [line for line in lines if line]
+            lines = []
+            inherited_time = ""
+            for row in block_rows:
+                if len(row) > 1 and _TIME.fullmatch(row[1]):
+                    inherited_time = row[1]
+                line = _format_manual_row(row, inherited_time)
+                if line:
+                    lines.append(line)
             damage = next((match.group(0) for row in block_rows for cell in row
                            for match in [_DAMAGE.search(cell)] if match), "")
         else:

@@ -1,4 +1,5 @@
 import time
+import os
 from datetime import datetime as DateTime
 from datetime import timedelta, timezone
 
@@ -6,8 +7,9 @@ from yt_dlp import YoutubeDL
 
 import datetime_utils as datetime
 import discord_utils as discord
+import post_change_tracker as post_tracker
 import gspread_utils as gspread
-from youtube_common import as_utc, write_urls_with_retry
+from youtube_common import as_utc, write_urls_with_retry, video_post_body
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from video_relevance import is_relevant_video
@@ -171,6 +173,7 @@ def findYouTubeVideo(
     pending_posts = []
     videoUrls = sheetVideo.col_values(5)
     known_video_urls = set(videoUrls)
+    video_rows = {row[4]: (index, row) for index, row in enumerate(sheetVideo.get_all_values()[1:], start=2) if len(row) > 4 and row[4]}
     channelIds = sheetChannel.col_values(2)
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
@@ -192,6 +195,14 @@ def findYouTubeVideo(
                 continue
             videoUrl = video.watch_url
             if videoUrl in known_video_urls:
+                old = video_rows.get(videoUrl)
+                if old and len(old[1]) > 3 and old[1][3] != video.title:
+                    previous = video_post_body(old[1][3], "動画タイトル更新前", videoUrl)
+                    row = list(old[1]) + [""] * max(0, 6 - len(old[1]))
+                    row[3], row[5] = video.title, previous
+                    if hasattr(sheetVideo, "update"):
+                        sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
+                    pending_posts.append({"url": videoUrl, "title": video.title, "notes": f"対象ボス: {bossName}（更新）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": previous})
                 continue
 
             if not is_relevant_video(video, (bossName,)):
@@ -242,7 +253,7 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append((videoUrl, videoTitle, f"対象ボス: {bossName}", f"boss{boss_index}_tl"))
+            pending_posts.append({"url": videoUrl, "title": videoTitle, "notes": f"対象ボス: {bossName}", "channel_key": f"boss{boss_index}_tl", "status": "new"})
 
         sleep(wait_time)
 
@@ -256,11 +267,14 @@ def findYouTubeVideo(
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
 
-    for videoUrl, videoTitle, notes, channel_key in pending_posts:
+    for item in pending_posts:
+        if os.environ.get("PRICONNER_NO_POST"):
+            continue
         try:
-            _post_to_channel(post, f"動画タイトル: {videoTitle}\n備考: {notes}\n動画URL: {videoUrl}", channel_key)
+            body = video_post_body(item['title'], item['notes'], item['url'])
+            _post_to_channel(post, post_tracker.post_content({**item, "text": body}), item["channel_key"])
         except Exception as error:
-            print(f"失敗: YouTube URL通知 {videoUrl}: {error}")
+            print(f"失敗: YouTube URL通知 {item['url']}: {error}")
         sleep(wait_time)
 
     if count > 0:
