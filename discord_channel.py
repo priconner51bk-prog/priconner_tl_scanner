@@ -195,7 +195,7 @@ def checkNewArrivalsForDiscordChannel(
         for message in messages:
             message_content = (message.get("content") or "")[:500]
             for url in extract_youtube_urls(message):
-                if url in known_urls and not os.environ.get("PRICONNER_FORCE_POST"):
+                if url in known_urls and not os.environ.get("PRICONNER_FORCE_POST") and not os.environ.get("PRICONNER_FORCE_NEW_POST"):
                     continue
                 known_urls.add(url)
                 info = video_info_factory(url)
@@ -227,6 +227,8 @@ def checkNewArrivalsForDiscordChannel(
                 status = "new" if not old else ("updated" if len(old[1]) < 3 or old[1][2] != digest else "same")
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
                     status = "updated"
+                if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
+                    status = "new"
                 if status == "same":
                     continue
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
