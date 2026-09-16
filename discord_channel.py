@@ -276,7 +276,8 @@ def checkNewArrivalsForDiscordChannel(
         wait_time=WAIT_TIME,
     )
 
-    post_items = new_urls[:1] if os.environ.get("PRICONNER_FORCE_NEW_LIMIT_ONE") else new_urls
+    limit = 1 if os.environ.get("PRICONNER_FORCE_NEW_LIMIT_ONE") else int(os.environ.get("PRICONNER_FORCE_POST_LIMIT", "0") or 0)
+    post_items = new_urls[:limit] if limit else new_urls
     for item in post_items:
         if os.environ.get("PRICONNER_NO_POST"):
             continue
