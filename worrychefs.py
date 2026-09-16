@@ -445,14 +445,14 @@ def compare_tl_records(rows, records):
     """Return new/changed records without treating unchanged rows as updates."""
     existing = {}
     for row in rows[1:]:
-        if len(row) >= 3 and row[0] and row[2]:
+        if len(row) >= 1 and row[0]:
             existing[row[0]] = row
     result = []
     for record in records:
         old = existing.get(record["key"])
         if old is None:
             record["status"] = "new"
-        elif old[2] != record["hash"]:
+        elif len(old) < 3 or not old[2] or old[2] != record["hash"]:
             record["status"] = "updated"
             record["previous_text"] = old[1] if len(old) > 1 else ""
         else:

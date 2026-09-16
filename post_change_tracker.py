@@ -1,5 +1,7 @@
 """Shared change tracking helpers for sheet-backed Discord posts."""
 
+import difflib
+
 
 def normalize_lines(text):
     return [" ".join(line.split()).strip() for line in str(text or "").splitlines()
@@ -7,9 +9,17 @@ def normalize_lines(text):
 
 
 def changed_lines(previous, current):
-    """Return only lines in the current content not present in the previous post."""
-    old = set(normalize_lines(previous))
-    return "\n".join(line for line in normalize_lines(current) if line not in old)
+    """Return an ordered unified diff for changed post lines."""
+    old = normalize_lines(previous)
+    new = normalize_lines(current)
+    diff = difflib.ndiff(old, new)
+    lines = []
+    for line in diff:
+        if line.startswith("+ "):
+            lines.append(f"追加: {line[2:]}")
+        elif line.startswith("- "):
+            lines.append(f"削除: {line[2:]}")
+    return "\n".join(lines)
 
 
 def update_record(record, existing_row, content_index=1, hash_index=2):
