@@ -541,7 +541,10 @@ class SafetyTests(unittest.TestCase):
             )
 
         self.assertEqual(sheet.written, [["https://www.youtube.com/watch?v=new1"]])
-        self.assertEqual(posted, ["https://www.youtube.com/watch?v=new1"])
+        self.assertEqual(len(posted), 1)
+        self.assertIn("動画タイトル: title", posted[0])
+        self.assertIn("備考: Discordメッセージから検出", posted[0])
+        self.assertIn("動画URL: https://www.youtube.com/watch?v=new1", posted[0])
         self.assertEqual(notified, ["Discord新着1件"])
 
     def test_token_fetch_saves_token_into_config(self):

@@ -126,7 +126,7 @@ def test_manual_block_keeps_seconds_and_set_auto_off():
     block = worrychefs.extract_tl_blocks(rows, "manual-d2")[0]
     assert block["code"] == "D20"
     assert "0:57 WShiori" in block["text"]
-    assert "1:30 [5-321]" in block["text"]
+    assert "1:30 OXOOO" in block["text"]
     assert "🅰️OFF" in block["text"]
 
 
@@ -149,4 +149,4 @@ def test_prepare_sheet_changes_preserves_first_seen_for_updates():
     )
     assert header[0] == "TLキー"
     assert inserts == []
-    assert updates == [(2, ["simple:D101", "new", "h2", "first", "now", "simple", "u"])]
+    assert updates == [(2, ["simple:D101", "new", "h2", "first", "now", "simple", "u", "old"])]
