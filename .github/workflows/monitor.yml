@@ -39,7 +39,7 @@ jobs:
       DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
       DISCORD_CHANNEL_IDS: ${{ secrets.DISCORD_CHANNEL_IDS }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      PRICONNER_MONITOR_STAGES: youtube-channel,youtube-search,discord-channel
+      PRICONNER_MONITOR_STAGES: youtube-channel,youtube-search,worrychefs,discord-channel
       PRICONNER_FORCE_NEW_POST: ${{ inputs.post_mode == 'new' && '1' || '' }}
       PRICONNER_FORCE_POST: ${{ inputs.post_mode == 'updated' && '1' || '' }}
       PRICONNER_FORCE_NEW_LIMIT_ONE: ${{ inputs.sample_one && '1' || '' }}
