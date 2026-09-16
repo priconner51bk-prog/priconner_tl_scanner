@@ -239,6 +239,8 @@ def checkNewArrivalsForDiscordChannel(
                 )
                 digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
                 old = tracking_by_url.get(url)
+                previous = old[1][1] if old and len(old[1]) > 1 else ""
+                row = [url, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
                 if was_known and not old:
                     status = "same"
                 else:
@@ -253,8 +255,6 @@ def checkNewArrivalsForDiscordChannel(
                             tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
                         tracking_by_url[url] = (2, row)
                     continue
-                previous = old[1][1] if old and len(old[1]) > 1 else ""
-                row = [url, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
                 if old and not os.environ.get("PRICONNER_FORCE_NEW_POST") and hasattr(tracking, "update"):
                     tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
                     tracking_by_url[url] = (old[0], row)
