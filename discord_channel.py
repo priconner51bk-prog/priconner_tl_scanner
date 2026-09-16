@@ -237,7 +237,13 @@ def checkNewArrivalsForDiscordChannel(
                     tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
                 elif not old:
                     tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
-                body = f"{url}\n\n{formatted_tl}" if formatted_tl else url
+                body = (
+                    f"動画タイトル: {title}\n"
+                    "備考: Discordメッセージから検出\n"
+                    f"動画URL: {url}"
+                )
+                if formatted_tl:
+                    body += f"\n\n{formatted_tl}"
                 new_urls.append({"url": url, "text": body, "status": status, "previous_text": previous})
                 print(f"new: {url}")
         retry_sleep(wait_time)
