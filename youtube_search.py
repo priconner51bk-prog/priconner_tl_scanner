@@ -196,6 +196,8 @@ def findYouTubeVideo(
             videoUrl = video.watch_url
             if videoUrl in known_video_urls:
                 old = video_rows.get(videoUrl)
+                if os.environ.get("PRICONNER_FORCE_POST") and old:
+                    pending_posts.append({"url": videoUrl, "title": video.title, "notes": f"確認用（更新・対象ボス: {bossName}）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": video_post_body(old[1][3] if len(old[1]) > 3 else "", "対象ボス", videoUrl)})
                 if old and len(old[1]) > 3 and old[1][3] != video.title:
                     previous = video_post_body(old[1][3], "動画タイトル更新前", videoUrl)
                     row = list(old[1]) + [""] * max(0, 6 - len(old[1]))

@@ -172,8 +172,9 @@ def checkNewArrivalsForDiscordChannel(
     )
     scan_time = datetime.dateTime2String(now_factory())
 
+    ss = spreadsheet or gspread.getNewArrivalsSheet()
     known_urls = set(gspread.getDamagesSheet().worksheet("Youtube").col_values(1))
-    tracking = gspread.getNewArrivalsSheet().worksheet("Discordスキャン")
+    tracking = ss.worksheet("Discordスキャン")
     tracking_rows = tracking.get_all_values()
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
     new_urls = []
@@ -194,7 +195,7 @@ def checkNewArrivalsForDiscordChannel(
         for message in messages:
             message_content = (message.get("content") or "")[:500]
             for url in extract_youtube_urls(message):
-                if url in known_urls:
+                if url in known_urls and not os.environ.get("PRICONNER_FORCE_POST"):
                     continue
                 known_urls.add(url)
                 info = video_info_factory(url)
@@ -224,13 +225,15 @@ def checkNewArrivalsForDiscordChannel(
                 digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
                 old = tracking_by_url.get(url)
                 status = "new" if not old else ("updated" if len(old[1]) < 3 or old[1][2] != digest else "same")
+                if os.environ.get("PRICONNER_FORCE_POST") and old:
+                    status = "updated"
                 if status == "same":
                     continue
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
                 row = [url, comparison, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
-                if old:
+                if old and not os.environ.get("PRICONNER_FORCE_POST"):
                     tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
-                else:
+                elif not old:
                     tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
                 body = f"{url}\n\n{formatted_tl}" if formatted_tl else url
                 new_urls.append({"url": url, "text": body, "status": status, "previous_text": previous})
