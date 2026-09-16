@@ -195,8 +195,7 @@ def checkNewArrivalsForDiscordChannel(
         for message in messages:
             message_content = (message.get("content") or "")[:500]
             for url in extract_youtube_urls(message):
-                if url in known_urls and not os.environ.get("PRICONNER_FORCE_POST") and not os.environ.get("PRICONNER_FORCE_NEW_POST"):
-                    continue
+                was_known = url in known_urls
                 known_urls.add(url)
                 info = video_info_factory(url)
                 title = info.get("title") or url
@@ -224,7 +223,10 @@ def checkNewArrivalsForDiscordChannel(
                 comparison = formatted_tl or title
                 digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
                 old = tracking_by_url.get(url)
-                status = "new" if not old else ("updated" if len(old[1]) < 3 or old[1][2] != digest else "same")
+                if was_known and not old:
+                    status = "same"
+                else:
+                    status = "new" if not old else ("updated" if len(old[1]) < 3 or old[1][2] != digest else "same")
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
                     status = "updated"
                 if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
@@ -233,7 +235,7 @@ def checkNewArrivalsForDiscordChannel(
                     continue
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
                 row = [url, comparison, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
-                if old and not os.environ.get("PRICONNER_FORCE_POST") and hasattr(tracking, "update"):
+                if old and not os.environ.get("PRICONNER_FORCE_NEW_POST") and hasattr(tracking, "update"):
                     tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
                 elif not old and hasattr(tracking, "insert_rows"):
                     tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
