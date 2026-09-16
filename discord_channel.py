@@ -175,7 +175,7 @@ def checkNewArrivalsForDiscordChannel(
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     known_urls = set(gspread.getDamagesSheet().worksheet("Youtube").col_values(1))
     tracking = ss.worksheet("Discordスキャン")
-    tracking_rows = tracking.get_all_values()
+    tracking_rows = tracking.get_all_values() if hasattr(tracking, "get_all_values") else []
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
     new_urls = []
 
@@ -233,9 +233,9 @@ def checkNewArrivalsForDiscordChannel(
                     continue
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
                 row = [url, comparison, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
-                if old and not os.environ.get("PRICONNER_FORCE_POST"):
+                if old and not os.environ.get("PRICONNER_FORCE_POST") and hasattr(tracking, "update"):
                     tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
-                elif not old:
+                elif not old and hasattr(tracking, "insert_rows"):
                     tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
                 body = (
                     f"動画タイトル: {title}\n"
