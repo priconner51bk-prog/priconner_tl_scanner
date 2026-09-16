@@ -178,6 +178,7 @@ def checkNewArrivalsForDiscordChannel(
     tracking = ss.worksheet("Discordスキャン")
     tracking_rows = tracking.get_all_values() if hasattr(tracking, "get_all_values") else []
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
+    processed_urls = set()
     new_urls = []
 
     for channel_id in channel_ids:
@@ -196,6 +197,9 @@ def checkNewArrivalsForDiscordChannel(
         for message in messages:
             message_content = (message.get("content") or "")[:500]
             for url in extract_youtube_urls(message):
+                if url in processed_urls:
+                    continue
+                processed_urls.add(url)
                 was_known = url in known_urls
                 known_urls.add(url)
                 info = video_info_factory(url)
@@ -244,13 +248,19 @@ def checkNewArrivalsForDiscordChannel(
                 if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
                     status = "new"
                 if status == "same":
+                    if not old:
+                        if hasattr(tracking, "insert_rows"):
+                            tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
+                        tracking_by_url[url] = (2, row)
                     continue
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
                 row = [url, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
                 if old and not os.environ.get("PRICONNER_FORCE_NEW_POST") and hasattr(tracking, "update"):
                     tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
+                    tracking_by_url[url] = (old[0], row)
                 elif not old and hasattr(tracking, "insert_rows"):
                     tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
+                    tracking_by_url[url] = (2, row)
                 new_urls.append({"url": url, "text": body, "status": status, "previous_text": previous})
                 print(f"new: {url}")
         retry_sleep(wait_time)
