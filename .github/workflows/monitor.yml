@@ -2,6 +2,21 @@ name: Run TL scanner
 
 on:
   workflow_dispatch:
+    inputs:
+      post_mode:
+        description: "投稿モード"
+        required: false
+        default: "normal"
+        type: choice
+        options:
+          - normal
+          - new
+          - updated
+      sample_one:
+        description: "各ステージ1件に制限（書式確認用）"
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "*/5 * * * *"
 
@@ -25,6 +40,9 @@ jobs:
       DISCORD_CHANNEL_IDS: ${{ secrets.DISCORD_CHANNEL_IDS }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       PRICONNER_MONITOR_STAGES: youtube-channel,youtube-search,discord-channel
+      PRICONNER_FORCE_NEW_POST: ${{ inputs.post_mode == 'new' && '1' || '' }}
+      PRICONNER_FORCE_POST: ${{ inputs.post_mode == 'updated' && '1' || '' }}
+      PRICONNER_FORCE_NEW_LIMIT_ONE: ${{ inputs.sample_one && '1' || '' }}
 
     steps:
       - uses: actions/checkout@v4
