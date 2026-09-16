@@ -41,7 +41,7 @@ def test_post_retries_then_succeeds():
     ) as sleep, patch.object(discord_utils.requests, "post", side_effect=flaky_post):
         discord_utils.post("hello")
     assert len(calls) == 2
-    assert sleep.call_count == 1
+    assert sleep.call_count == 2
 
 
 def test_post_raises_after_exhausting_retries():

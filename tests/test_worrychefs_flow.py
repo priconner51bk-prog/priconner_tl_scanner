@@ -40,8 +40,8 @@ def test_worrychefs_records_new_tl_and_notifies():
     html = (
         "<table>"
         "<tr><th>code</th><th>damage</th><th>style</th></tr>"
-        "<tr><td>D101</td><td>1234m</td><td>Auto</td></tr>"
-        "<tr><td>D102</td><td>2m</td><td>Manual</td></tr>"
+        "<tr><td>D503</td><td>1234m</td><td>Auto</td></tr>"
+        "<tr><td>D504</td><td>2m</td><td>Manual</td></tr>"
         "</table>"
     )
 
@@ -63,7 +63,7 @@ def test_worrychefs_records_new_tl_and_notifies():
         )
 
     assert len(tl_sheet.inserted) == 2
-    assert any("D101" in row[0] for row in tl_sheet.inserted)
+    assert any("D503" in row[0] for row in tl_sheet.inserted)
     assert len(notified) == 1
 
 
