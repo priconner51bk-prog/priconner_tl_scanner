@@ -216,10 +216,19 @@ def formation_image_urls(html, code=None):
             candidates.append((imgs, labels))
     if not candidates:
         return []
-    # The source row may contain one boss portrait followed by five characters.
+    # The source row may contain one boss portrait in addition to the five
+    # character portraits.  Never select the boss as a formation slot when
+    # the published HTML provides a label for it.
     best_images, best_labels = candidates[max(range(len(candidates)), key=lambda i: len(candidates[i][0]))]
-    result = best_images[-5:]
-    best_labels = best_labels[-5:]
+    character_pairs = [
+        (image, label) for image, label in zip(best_images, best_labels)
+        if label and not re.search(r"(?:\bboss\b|ボス|敵)", label, re.IGNORECASE)
+    ]
+    if len(character_pairs) >= 5:
+        best_images, best_labels = zip(*character_pairs)
+        best_images, best_labels = list(best_images), list(best_labels)
+    result = best_images[:5]
+    best_labels = best_labels[:5]
     # Keep the source image alt text for 404 placeholders.  This is the
     # original sheet name, before character-name translation.
     # Resolve labels from the row immediately preceding the portrait row.
