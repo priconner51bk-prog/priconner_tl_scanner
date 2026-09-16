@@ -359,20 +359,6 @@ def formation_info_md(html, code, manual_layout=False):
     return "\n".join(lines)
 
 
-def set_state_md(text):
-    """Render SET masks as a compact O/X row in the post."""
-    masks = re.findall(r"\[([54321-]{5})\]", text)
-    if not masks:
-        return ""
-    rows = ["SET状態", "", "時刻      状態"]
-    for line in text.splitlines():
-        match = re.search(r"(\d{1,3}:\d{2}).*?\[([54321-]{5})\]", line)
-        if match:
-            state = "".join("○" if char != "-" else "×" for char in match.group(2))
-            rows.append(f"{match.group(1):<9} {state}")
-    return "\n".join(rows) if len(rows) > 3 else ""
-
-
 def load_worrychefs_sources(path=None):
     path = Path(path or Path(__file__).with_name("worrychefs_sources.json"))
     with path.open(encoding="utf-8") as stream:
