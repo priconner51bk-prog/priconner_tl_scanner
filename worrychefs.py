@@ -545,8 +545,6 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
             continue
         if record["key"] not in changed_keys:
             continue
-        if record["key"] not in changed_keys:
-            continue
         post_text = post_tracker.post_content(record)
         content = (f"[WorryChefs更新] {record['code']} ({record['source']})\n"
                    f"新規投稿日時: {record.get('first_seen', detected_at)}\n"

@@ -234,6 +234,8 @@ def checkNewArrivalsForYouTube(
 
                 if videoUrl in known_video_urls:
                     old = video_rows.get(videoUrl)
+                    if os.environ.get("PRICONNER_FORCE_POST") and old:
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの確認用（更新）", "status": "updated", "previous_text": video_post_body(old[1][3] if len(old[1]) > 3 else "", "登録チャンネルの新着動画", videoUrl)})
                     if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
                         pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの確認用（新規）", "status": "new"})
                     if old and len(old[1]) > 3 and old[1][3] != yt.title:
