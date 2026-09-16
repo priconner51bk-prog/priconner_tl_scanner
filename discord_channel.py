@@ -174,6 +174,7 @@ def checkNewArrivalsForDiscordChannel(
 
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     known_urls = set(gspread.getDamagesSheet().worksheet("Youtube").col_values(1))
+    initial_known_urls = set(known_urls)
     tracking = ss.worksheet("Discordスキャン")
     tracking_rows = tracking.get_all_values() if hasattr(tracking, "get_all_values") else []
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
@@ -256,7 +257,8 @@ def checkNewArrivalsForDiscordChannel(
     sheet = gspread.getDamagesSheet().worksheet("Youtube")
     gspread.writeToFirstEmptyCells(
         sheet,
-        [item["url"] for item in new_urls if item.get("status") == "new"],
+        [item["url"] for item in new_urls
+         if item.get("status") == "new" and item["url"] not in initial_known_urls],
         wait_time=WAIT_TIME,
     )
 
