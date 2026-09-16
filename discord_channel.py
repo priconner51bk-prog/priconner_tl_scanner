@@ -221,7 +221,18 @@ def checkNewArrivalsForDiscordChannel(
                     formatted_tl = format_discord_tl(message.get("content") or "")
                 except RuntimeError as error:
                     print(f"警告: TLフォーマッタを利用できません: {error}")
-                comparison = formatted_tl or title
+                body = (
+                    f"動画タイトル: {title}\n"
+                    "備考: Discordメッセージから検出\n"
+                    f"動画URL: {url}"
+                )
+                if formatted_tl:
+                    body += f"\n\n{formatted_tl}"
+                comparison = post_tracker.comparison_text(
+                    f"動画タイトル: {title}",
+                    "備考: Discordメッセージから検出",
+                    formatted_tl,
+                )
                 digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
                 old = tracking_by_url.get(url)
                 if was_known and not old:
@@ -235,18 +246,11 @@ def checkNewArrivalsForDiscordChannel(
                 if status == "same":
                     continue
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
-                row = [url, comparison, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
+                row = [url, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
                 if old and not os.environ.get("PRICONNER_FORCE_NEW_POST") and hasattr(tracking, "update"):
                     tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
                 elif not old and hasattr(tracking, "insert_rows"):
                     tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
-                body = (
-                    f"動画タイトル: {title}\n"
-                    "備考: Discordメッセージから検出\n"
-                    f"動画URL: {url}"
-                )
-                if formatted_tl:
-                    body += f"\n\n{formatted_tl}"
                 new_urls.append({"url": url, "text": body, "status": status, "previous_text": previous})
                 print(f"new: {url}")
         retry_sleep(wait_time)
