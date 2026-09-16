@@ -248,7 +248,8 @@ def checkNewArrivalsForDiscordChannel(
     sheet = gspread.getDamagesSheet().worksheet("Youtube")
     gspread.writeToFirstEmptyCells(sheet, [item["url"] for item in new_urls], wait_time=WAIT_TIME)
 
-    for item in new_urls:
+    post_items = new_urls[:1] if os.environ.get("PRICONNER_FORCE_NEW_LIMIT_ONE") else new_urls
+    for item in post_items:
         if os.environ.get("PRICONNER_NO_POST"):
             continue
         try:

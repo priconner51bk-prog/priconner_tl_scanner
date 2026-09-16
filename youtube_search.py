@@ -269,7 +269,8 @@ def findYouTubeVideo(
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
 
-    for item in pending_posts:
+    post_items = pending_posts[:1] if os.environ.get("PRICONNER_FORCE_NEW_LIMIT_ONE") else pending_posts
+    for item in post_items:
         if os.environ.get("PRICONNER_NO_POST"):
             continue
         try:
