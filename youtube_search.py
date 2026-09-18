@@ -1,18 +1,25 @@
-import time
 import os
+import time
+from collections import Counter
 from datetime import datetime as DateTime
-from datetime import timedelta, timezone
+from datetime import timezone
 
 from yt_dlp import YoutubeDL
 
 import datetime_utils as datetime
 import discord_utils as discord
-import post_change_tracker as post_tracker
 import gspread_utils as gspread
-from youtube_common import as_utc, write_urls_with_retry, video_post_body
+import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
+from tl_formatting import format_discord_tl
 from video_relevance import is_relevant_video
+from youtube_common import (
+    as_utc,
+    is_in_youtube_period,
+    video_post_body,
+    write_urls_with_retry,
+)
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
@@ -21,12 +28,48 @@ DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 50
 
 
+def selected_bosses(boss_names, selection=None):
+    """Return the configured boss subset for an isolated worker."""
+    if selection is None:
+        selection = os.environ.get("PRICONNER_YOUTUBE_BOSS_INDEX", "").strip()
+    if not selection:
+        return list(enumerate(boss_names[:5], start=1))
+    try:
+        index = int(selection)
+    except ValueError as error:
+        raise ValueError("PRICONNER_YOUTUBE_BOSS_INDEX must be an integer from 1 to 5") from error
+    if not 1 <= index <= min(5, len(boss_names)):
+        raise ValueError("PRICONNER_YOUTUBE_BOSS_INDEX is outside the configured boss list")
+    return [(index, boss_names[index - 1])]
+
+
 def _post_to_channel(post, text, channel_key):
+    if post is discord.post:
+        return discord.post_to_configured_guilds(text, channel_key=channel_key)
     try:
         return post(text, channel_key=channel_key)
     except TypeError:
         # Keep compatibility with simple injected test callbacks.
         return post(text)
+
+
+def _notify_to_channel(notify, text, channel_key):
+    """Keep summary notifications in the same isolated boss channel."""
+    if notify is discord.notify:
+        return discord.notify_to_configured_guilds(text, channel_key=channel_key)
+    try:
+        return notify(text, channel_key=channel_key)
+    except TypeError:
+        # Keep compatibility with simple injected test callbacks.
+        return notify(text)
+
+
+def _format_youtube_tl(description):
+    try:
+        return format_discord_tl(description)
+    except (RuntimeError, ValueError) as error:
+        print(f"警告: YouTube概要欄のTL整形を利用できません: {error}")
+        return ""
 
 
 _as_utc = as_utc
@@ -87,6 +130,8 @@ def search_youtube(query, now_factory=None):
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
+    period_mode = gspread.get_config_value("youtube", "period_mode", "days")
+    period_month = gspread.get_config_value("youtube", "period_month", "")
     search_limit = gspread.get_int_config_value(
         "youtube", "search_limit", DEFAULT_SEARCH_LIMIT, minimum=1, maximum=MAX_SEARCH_LIMIT
     )
@@ -101,7 +146,6 @@ def search_youtube(query, now_factory=None):
     with YoutubeDL(options) as ydl:
         result = ydl.extract_info(f"ytsearch{search_limit}:{query}", download=False)
     now = _as_utc(now_factory() if now_factory else DateTime.now(timezone.utc))
-    cutoff = now - timedelta(days=period_days)
     videos = []
     seen_urls = set()
     for entry in result.get("entries", []):
@@ -114,24 +158,33 @@ def search_youtube(query, now_factory=None):
         if video.watch_url in seen_urls:
             continue
         seen_urls.add(video.watch_url)
-        if video.publish_date is not None and video.publish_date >= cutoff:
+        if is_in_youtube_period(
+            video.publish_date, now, period_days, period_mode, period_month
+        ):
             videos.append(video)
     return videos
 
 
-def is_recent_video(video, now=None, period_days=None):
+def is_recent_video(
+    video, now=None, period_days=None, period_mode=None, period_month=None
+):
     """Return whether a video falls within the configured period."""
     now = now or DateTime.now(timezone.utc)
+    explicit_period_days = period_days is not None
     if period_days is None:
         period_days = gspread.get_int_config_value(
             "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
         )
-    publish_date = video.publish_date
-    if publish_date is None:
-        return False
-    publish_date = _as_utc(publish_date)
-    now = _as_utc(now)
-    return publish_date >= now - timedelta(days=period_days)
+    if period_mode is None:
+        period_mode = (
+            "days" if explicit_period_days
+            else gspread.get_config_value("youtube", "period_mode", "days")
+        )
+    if period_month is None:
+        period_month = gspread.get_config_value("youtube", "period_month", "")
+    return is_in_youtube_period(
+        video.publish_date, now, period_days, period_mode, period_month
+    )
 
 
 def findYouTubeVideo(
@@ -143,6 +196,7 @@ def findYouTubeVideo(
     write_urls=None,
     sleep=time.sleep,
     wait_time=WAIT_TIME,
+    now_factory=None,
 ):
     print("YouTube検索")
 
@@ -171,6 +225,9 @@ def findYouTubeVideo(
     count = 0
     damage_urls = []
     pending_posts = []
+    post_failures = Counter()
+    posted_count = 0
+    new_count_by_channel = Counter()
     videoUrls = sheetVideo.col_values(5)
     known_video_urls = set(videoUrls)
     video_rows = {row[4]: (index, row) for index, row in enumerate(sheetVideo.get_all_values()[1:], start=2) if len(row) > 4 and row[4]}
@@ -178,35 +235,49 @@ def findYouTubeVideo(
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
+    period_mode = gspread.get_config_value("youtube", "period_mode", "days")
+    period_month = gspread.get_config_value("youtube", "period_month", "")
+    now = _as_utc(
+        now_factory() if now_factory else DateTime.now(timezone.utc)
+    )
     channel_name_cache = {}
     channel_values = []
     video_values = []
 
-    for boss_index, bossName in enumerate(bossNames[:5], start=1):
+    for boss_index, bossName in selected_bosses(bossNames):
         print(f"ボス名：{bossName}")
         keywords = f"{bossName} プリコネ"
 
-        nowScanTime = datetime.nowString()
+        nowScanTime = datetime.dateTime2String(now)
         search = search_factory(keywords)
 
         videos = search.videos if hasattr(search, "videos") else search
         for video in videos:
-            if not is_recent_video(video, period_days=period_days):
+            if not is_recent_video(
+                video,
+                now=now,
+                period_days=period_days,
+                period_mode=period_mode,
+                period_month=period_month,
+            ):
                 continue
             videoUrl = video.watch_url
+            description = getattr(video, "description", "")
+            formatted_tl = _format_youtube_tl(description)
             if videoUrl in known_video_urls:
                 old = video_rows.get(videoUrl)
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "notes": f"確認用（更新・対象ボス: {bossName}）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": video_post_body(old[1][3] if len(old[1]) > 3 else "", "対象ボス", videoUrl)})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": f"確認用（更新・対象ボス: {bossName}）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "force_full": True})
                 if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "notes": f"確認用（新規・対象ボス: {bossName}）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
-                if old and len(old[1]) > 3 and old[1][3] != video.title:
-                    previous = video_post_body(old[1][3], "動画タイトル更新前", videoUrl)
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": f"確認用（新規・対象ボス: {bossName}）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
+                if old and len(old[1]) > 3 and post_tracker.normalize_comparison_text(old[1][3]) != post_tracker.normalize_comparison_text(video.title):
+                    notes = f"対象ボス: {bossName}（更新）"
+                    previous = video_post_body(old[1][3], notes, videoUrl)
                     row = list(old[1]) + [""] * max(0, 6 - len(old[1]))
                     row[3], row[5] = video.title, previous
                     if hasattr(sheetVideo, "update"):
                         sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
-                    pending_posts.append({"url": videoUrl, "title": video.title, "notes": f"対象ボス: {bossName}（更新）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": previous})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": previous, "force_full": True})
                 continue
 
             if not is_relevant_video(video, (bossName,)):
@@ -257,7 +328,8 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append({"url": videoUrl, "title": videoTitle, "notes": f"対象ボス: {bossName}", "channel_key": f"boss{boss_index}_tl", "status": "new"})
+            pending_posts.append({"url": videoUrl, "title": videoTitle, "description": description, "formatted_tl": formatted_tl, "notes": f"対象ボス: {bossName}", "channel_key": f"boss{boss_index}_tl", "status": "new"})
+            new_count_by_channel[f"boss{boss_index}_tl"] += 1
 
         sleep(wait_time)
 
@@ -277,17 +349,30 @@ def findYouTubeVideo(
         if os.environ.get("PRICONNER_NO_POST"):
             continue
         try:
-            body = video_post_body(item['title'], item['notes'], item['url'])
+            body = video_post_body(
+                item['title'], item['notes'], item['url'],
+                item.get('description', ''), item.get('formatted_tl', ''),
+            )
             _post_to_channel(post, post_tracker.post_content({**item, "text": body}), item["channel_key"])
+            posted_count += 1
         except Exception as error:
             print(f"失敗: YouTube URL通知 {item['url']}: {error}")
+            post_failures[f"{type(error).__name__}: {error}"] += 1
         sleep(wait_time)
 
+    print(
+        f"YouTube検索投稿結果: 候補{len(post_items)}件 / 成功{posted_count}件 / "
+        f"失敗{sum(post_failures.values())}件"
+    )
+    for reason, count in post_failures.items():
+        print(f"失敗理由 ({count}件): {reason}")
+
     if count > 0:
-        try:
-            notify(f"Youtube新着{count}件")
-        except Exception as error:
-            print(f"失敗: YouTube集計通知: {error}")
+        for channel_key, channel_count in new_count_by_channel.items():
+            try:
+                _notify_to_channel(notify, f"Youtube新着{channel_count}件", channel_key)
+            except Exception as error:
+                print(f"失敗: YouTube集計通知 ({channel_key}): {error}")
 
     if video_values:
         sheetVideo.sort((3, "des"), range="A2:Z10000")

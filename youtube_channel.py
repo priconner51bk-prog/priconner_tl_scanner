@@ -1,5 +1,6 @@
-import time
 import os
+import time
+from collections import Counter
 from datetime import datetime as DateTime
 from datetime import timezone
 
@@ -7,26 +8,56 @@ from yt_dlp import YoutubeDL
 
 import datetime_utils as datetime
 import discord_utils as discord
-import post_change_tracker as post_tracker
 import gspread_utils as gspread
-from youtube_common import as_utc, write_urls_with_retry, video_post_body, VIDEO_HEADERS
+import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
+from tl_formatting import format_discord_tl
+from youtube_common import (
+    as_utc,
+    is_in_youtube_period,
+    video_post_body,
+    write_urls_with_retry,
+    youtube_period_bounds,
+)
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
-# Network calls are already rate limited by YouTube/Discord.  A four second
-# delay per channel made a normal scan take several minutes.
-WAIT_TIME = 0
+# Keep both channel requests and Discord posts serialized.  Discord also has
+# its own API interval/429 retry guard, but this delay protects injected or
+# alternate post implementations used by the scheduled runner.
+WAIT_TIME = 2
 DEFAULT_PERIOD_DAYS = 7
-# A bounded page keeps scans predictable, while flat extraction avoids
-# detailed video requests for every listed entry.
+# A bounded page keeps scans predictable while retaining upload dates needed
+# for the current-month safety boundary.
 DEFAULT_CHANNEL_LIMIT = 20
+YOUTUBE_SOCKET_TIMEOUT = 15
+YOUTUBE_RETRIES = 1
 
 
 _as_utc = as_utc
 
 
 _write_urls_with_retry = write_urls_with_retry
+
+
+def _format_youtube_tl(description):
+    try:
+        return format_discord_tl(description)
+    except (RuntimeError, ValueError) as error:
+        print(f"警告: YouTube概要欄のTL整形を利用できません: {error}")
+        return ""
+
+
+def _post_configured(post, text):
+    if post is discord.post:
+        return discord.post_to_configured_guilds(text)
+    return post(text)
+
+
+def _notify_configured(notify, text):
+    if notify is discord.notify:
+        return discord.notify_to_configured_guilds(text)
+    return notify(text)
 
 
 class YTDLPVideo:
@@ -68,10 +99,15 @@ class YTDLPChannel:
         options = {
             "quiet": True,
             "skip_download": True,
-            # Listing entries is substantially faster and is enough here: a
-            # managed channel is itself the user's inclusion decision.
-            "extract_flat": True,
+            # Detailed entries are required for upload_date.  Flat entries
+            # frequently omit it, which makes a current-month boundary
+            # impossible to enforce safely.
+            "extract_flat": False,
             "ignoreerrors": True,
+            "socket_timeout": YOUTUBE_SOCKET_TIMEOUT,
+            "retries": YOUTUBE_RETRIES,
+            "fragment_retries": YOUTUBE_RETRIES,
+            "extractor_retries": YOUTUBE_RETRIES,
             "remote_components": ["ejs:github"],
             # playlist_items is intentional in addition to start/end.  Some
             # YouTube channel extractors fetch a larger continuation page and
@@ -160,6 +196,13 @@ def checkNewArrivalsForYouTube(
     wait_time=WAIT_TIME,
     now_factory=datetime.now,
 ):
+    if (os.environ.get("PRICONNER_YOUTUBE_BOSS_INDEX", "").strip()
+            and not os.environ.get("PRICONNER_ALLOW_SHARED_CHANNEL_SCAN")):
+        print(
+            "YouTubeチャンネル監視をスキップ: "
+            "ボス限定試験中は共通投稿先を混在させません"
+        )
+        return
     print("新着チェック対象:YouTube")
 
     if write_urls is None:
@@ -169,6 +212,8 @@ def checkNewArrivalsForYouTube(
     count = 0
     damage_urls = []
     pending_posts = []
+    post_failures = Counter()
+    posted_count = 0
 
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     videoUrls = sheetVideo.col_values(5)
@@ -178,8 +223,12 @@ def checkNewArrivalsForYouTube(
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
+    period_mode = gspread.get_config_value("youtube", "period_mode", "days")
+    period_month = gspread.get_config_value("youtube", "period_month", "")
     now = _as_utc(now_factory())
-    lasted_scan_time = datetime.calcDate(now, period_days)
+    period_start, period_end = youtube_period_bounds(
+        now, period_days, period_mode, period_month
+    )
     for i, row in enumerate(rows, start=1):
         if i <= 1:
             continue
@@ -223,6 +272,7 @@ def checkNewArrivalsForYouTube(
                 break
 
             stop_channel = False
+            page_unknown_date = False
             for yt in page_videos:
                 try:
                     videoUrl = yt.watch_url
@@ -231,26 +281,59 @@ def checkNewArrivalsForYouTube(
                     continue
 
                 print(f"videoUrl:{videoUrl}")
+                description = getattr(yt, "description", "")
+                formatted_tl = _format_youtube_tl(description)
+
+                publishDate = yt.publish_date
+                if (publishDate is None
+                        and str(period_mode).strip().lower()
+                        in {"month", "current_month", "target_month"}):
+                    print("upload date unavailable; cannot verify current month; skipping")
+                    page_unknown_date = True
+                    continue
+                if publishDate is not None:
+                    publishDate = _as_utc(publishDate)
+                    if publishDate < period_start:
+                        stop_channel = True
+                        break
+                    if period_end is not None and publishDate >= period_end:
+                        # The feed is newest-first.  A future/out-of-target
+                        # entry is skipped, but older entries may still be in
+                        # the requested target month.
+                        continue
 
                 if videoUrl in known_video_urls:
                     old = video_rows.get(videoUrl)
-                    if os.environ.get("PRICONNER_FORCE_POST") and old:
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの確認用（更新）", "status": "updated", "previous_text": video_post_body(old[1][3] if len(old[1]) > 3 else "", "登録チャンネルの新着動画", videoUrl)})
-                    if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの確認用（新規）", "status": "new"})
-                    if old and len(old[1]) > 3 and old[1][3] != yt.title:
-                        previous = video_post_body(old[1][3], "登録チャンネルの新着動画", videoUrl)
+                    if (os.environ.get("PRICONNER_FORCE_POST") and old
+                            and is_in_youtube_period(
+                                yt.publish_date,
+                                now,
+                                period_days,
+                                period_mode,
+                                period_month,
+                            )):
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの確認用（更新）", "status": "updated", "force_full": True})
+                    if (os.environ.get("PRICONNER_FORCE_NEW_POST") and old
+                            and is_in_youtube_period(
+                                yt.publish_date,
+                                now,
+                                period_days,
+                                period_mode,
+                                period_month,
+                            )):
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの確認用（新規）", "status": "new"})
+                    if old and len(old[1]) > 3 and post_tracker.normalize_comparison_text(old[1][3]) != post_tracker.normalize_comparison_text(yt.title):
+                        notes = "登録チャンネルの動画更新"
+                        previous = video_post_body(old[1][3], notes, videoUrl)
                         row = list(old[1]) + [""] * max(0, 6 - len(old[1]))
                         row[3], row[5] = yt.title, previous
                         if hasattr(sheetVideo, "update"):
                             sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの動画更新", "status": "updated", "previous_text": previous})
-                    # Entries are newest first. Once a known entry is reached,
-                    # older entries cannot produce a new result.
-                    stop_channel = True
-                    break
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "status": "updated", "previous_text": previous, "force_full": True})
+                    # Keep scanning known entries inside the configured period
+                    # so title updates on older videos are not missed.
+                    continue
 
-                publishDate = yt.publish_date
                 if publishDate is None:
                     # Flat playlist entries occasionally omit upload_date. Since
                     # this is a managed channel and the entry is before the first
@@ -260,10 +343,6 @@ def checkNewArrivalsForYouTube(
                     publishDate = now
                 else:
                     publishDate = _as_utc(publishDate)
-
-                if publishDate <= lasted_scan_time:
-                    stop_channel = True
-                    break
 
                 if len(publishDateString) == 0 or publishDate > datetime.string2DateTime(
                     publishDateString
@@ -287,9 +366,11 @@ def checkNewArrivalsForYouTube(
 
                 count += 1
                 damage_urls.append(videoUrl)
-                pending_posts.append({"url": videoUrl, "title": yt.title, "notes": "登録チャンネルの新着動画", "status": "new"})
+                pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの新着動画", "status": "new"})
 
-            if stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT:
+            if (stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT
+                    or (page_unknown_date and str(period_mode).strip().lower()
+                        in {"month", "current_month", "target_month"})):
                 break
             page_start += DEFAULT_CHANNEL_LIMIT
 
@@ -324,15 +405,27 @@ def checkNewArrivalsForYouTube(
         if os.environ.get("PRICONNER_NO_POST"):
             continue
         try:
-            body = video_post_body(item['title'], item['notes'], item['url'])
-            post(post_tracker.post_content({**item, "text": body}))
+            body = video_post_body(
+                item['title'], item['notes'], item['url'],
+                item.get('description', ''), item.get('formatted_tl', ''),
+            )
+            _post_configured(post, post_tracker.post_content({**item, "text": body}))
+            posted_count += 1
         except Exception as error:
             print(f"失敗: YouTube URL通知 {item['url']}: {error}")
+            post_failures[f"{type(error).__name__}: {error}"] += 1
         sleep(wait_time)
+
+    print(
+        f"YouTubeチャンネル投稿結果: 候補{len(post_items)}件 / 成功{posted_count}件 / "
+        f"失敗{sum(post_failures.values())}件"
+    )
+    for reason, count in post_failures.items():
+        print(f"失敗理由 ({count}件): {reason}")
 
     if count > 0:
         try:
-            notify(f"Youtube新着{count}件")
+            _notify_configured(notify, f"Youtube新着{count}件")
         except Exception as error:
             print(f"失敗: YouTube集計通知: {error}")
 

@@ -1,12 +1,12 @@
-import re
-import time
-import os
+import csv
 import hashlib
 import io
-import csv
 import json
-from pathlib import Path
+import os
+import re
+import time
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
@@ -15,8 +15,8 @@ import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
 import post_change_tracker as post_tracker
-from public_sheet_export import fetch_public_sheet
 from new_arrivals_markdown import write_arrival
+from public_sheet_export import fetch_public_sheet
 from runtime_utils import run_locked
 
 _D_CODE = re.compile(r"^D([1-5])\d{1,2}$")
@@ -25,11 +25,6 @@ _TIME = re.compile(r"^(?:\d{1,2}:\d{2}|\d{1,3})$")
 _DAMAGE = re.compile(r"\d+(?:\.\d+)?m\+?", re.IGNORECASE)
 _AUTHOR = re.compile(r"(?:Original\s+)?Author:\s*(.*)", re.IGNORECASE)
 _ANY_CODE = re.compile(r"\bD(?:[1-5]T\d{2}|[1-5]\d{1,2})\b")
-
-
-def _is_target_code(code):
-    """Return whether a code is the only code currently posted to Discord."""
-    return str(code or "").strip().upper() == "D503"
 
 
 def canonicalize_tl(text):
@@ -103,33 +98,67 @@ def _translate_sheet_character_names(text):
         matches = []
         for name in aliases:
             name_lower = name.lower()
-            # WorryChefs prefixes short names, e.g. NYPeco/BNephi/GGMugi.
-            # Match the longest meaningful contiguous fragment of name_en.
-            if name_lower == token_lower or (len(token_lower) >= 4 and name_lower in token_lower):
-                matches.append((len(name_lower), name))
+            base_score = 1 if "(" not in name else 0
+            if name_lower == token_lower:
+                matches.append((len(name_lower), base_score, -len(name), name))
                 continue
-            fragments = [name_lower[index:index + size]
-                         for size in range(4, len(name_lower) + 1)
-                         for index in range(len(name_lower) - size + 1)]
-            if any(fragment in token_lower for fragment in fragments):
-                matches.append((max(len(fragment) for fragment in fragments if fragment in token_lower), name))
+            # Accept a short, unambiguous prefix such as Peco -> Pecorine.
+            if len(token_lower) >= 4 and name_lower.startswith(token_lower):
+                matches.append((len(token_lower), base_score, -len(name), name))
+                continue
+            # Some sheets prefix a name fragment with uppercase initials, e.g.
+            # PAoi, BNephi, GGMugi, and NYPeco. Try only fragments of at least
+            # three characters after an all-uppercase prefix; never match
+            # arbitrary words such as "frame".
+            for split in range(1, len(token_lower) - 2):
+                prefix = token[:split]
+                fragment = token_lower[split:]
+                if prefix.isupper() and len(fragment) >= 3 and fragment in name_lower:
+                    matches.append((len(fragment), base_score, -len(name), name))
         if matches:
-            name = max(matches)[1]
+            name = max(matches)[3]
             text = re.sub(rf"(?<![A-Za-z]){re.escape(token)}(?![A-Za-z])", aliases[name], text)
     for index, note in enumerate(protected):
         text = text.replace(f"__TL_NOTE_{index}__", note)
     return text
 
 
+def _translate_known_character_tokens(text):
+    """Translate only exact names and full-name initial prefixes in notes."""
+    aliases = _load_character_aliases()
+    exact = {name.lower(): alias for name, alias in aliases.items()}
+    tokens = sorted(
+        set(re.findall(r"(?<![A-Za-z])[A-Za-z][A-Za-z-]{2,}(?![A-Za-z])", text)),
+        key=len,
+        reverse=True,
+    )
+    for token in tokens:
+        replacement = exact.get(token.lower())
+        if replacement is None:
+            for split in range(1, len(token) - 2):
+                prefix = token[:split]
+                fragment = token[split:]
+                if prefix.isupper() and fragment.lower() in exact:
+                    replacement = exact[fragment.lower()]
+                    break
+        if replacement is not None:
+            text = re.sub(
+                rf"(?<![A-Za-z]){re.escape(token)}(?![A-Za-z])",
+                replacement,
+                text,
+            )
+    return text
+
+
 def format_tl_text(text):
     """Resolve sheet abbreviations and apply the optional TL formatter."""
     try:
-        # Translate only action rows.  Untimed notes such as ``Tell:`` and
-        # parenthesized explanations must retain their original wording.
+        # Use fuzzy translation for action rows, but strict known-name-only
+        # translation for untimed notes so prose such as ``Tell`` is preserved.
         text = "\n".join(
             _translate_sheet_character_names(line)
             if re.match(r"^\s*\d{1,3}:\d{2}\b", line)
-            else line
+            else _translate_known_character_tokens(line)
             for line in text.splitlines()
         )
     except (requests.RequestException, RuntimeError, KeyError, ValueError):
@@ -137,9 +166,19 @@ def format_tl_text(text):
     # The published sheet writes formation masks as ``OOXOX, Auto ON``.
     # The formatter expects the mask as a standalone token.
     text = re.sub(r"([OX〇⭕️❌－\-]{5})\s*,", r"\1 ", text)
+    # ``UB >`` is a source-sheet routing marker, not part of the published TL.
+    text = re.sub(r"\bUB\s*>\s*", "", text, flags=re.IGNORECASE)
     try:
-        from priconner_tl import format_text
-    except ImportError:
+        # Reuse the configured formatter loader so the local checkout at
+        # [discord_channel] tl_formatter_path is available in this process.
+        # A direct ``from priconner_tl`` import only works when the formatter
+        # project has already been installed into the active interpreter.
+        from tl_formatting import FormatterSyncError, _load_formatter
+
+        format_text = _load_formatter()
+    except FormatterSyncError:
+        raise
+    except (ImportError, RuntimeError):
         return canonicalize_tl(text)
     # Discord TL output should not contain route arrows.
     # O/X形式のSET操作はTL formatter側で[54321]形式へ変換する。
@@ -255,7 +294,7 @@ def formation_image_urls(html, code=None):
                 names = [v for v in before_time
                          if v and not re.fullmatch(
                              r"(?:\d[\d-]*|\d{1,3}:\d{2}|MAX(?:/\d+)?|UE|CR)",
-                             v, re.I)]
+                             v, re.IGNORECASE)]
                 if len(names) >= 5:
                     label = names[max(0, min(image_index, len(names) - 1))]
                     break
@@ -266,8 +305,7 @@ def formation_image_urls(html, code=None):
 
 def combined_formation_image(urls, http_get=requests.get):
     """Download five portraits and return one horizontal PNG file object."""
-    from PIL import Image
-    from PIL import ImageDraw
+    from PIL import Image, ImageDraw
     portraits = []
     labels = _formation_labels_cache.get(tuple(urls), [""] * len(urls))
     for index, url in enumerate(urls[:5]):
@@ -347,9 +385,10 @@ def formation_info_md(html, code, manual_layout=False):
             candidate = values[time_index - 5:time_index]
         else:
             candidate = []
-        if not names and len(candidate) == 5:
-            if all(candidate) and not any(re.search(r"Author|Transcribed|Duration|EV/OT", v, re.I) for v in candidate):
-                names = candidate
+        if (not names and len(candidate) == 5 and all(candidate)
+                and not any(re.search(r"Author|Transcribed|Duration|EV/OT", v, re.IGNORECASE)
+                            for v in candidate)):
+            names = candidate
         for marker in info:
             if marker in values:
                 i = values.index(marker)
@@ -359,9 +398,11 @@ def formation_info_md(html, code, manual_layout=False):
     if len(names) != 5:
         return ""
     # Sheets display the formation left-to-right; posts require right-to-left.
+    # 編成情報のキャラ名は原文を保持する。翻訳名ではキャラの種別・衣装等の
+    # 情報が欠けるため、アクション行の翻訳とは分離する。
     names = list(reversed(names))
-    for marker in info:
-        info[marker] = list(reversed(info[marker])) if len(info[marker]) == 5 else [""] * 5
+    for marker, values in info.items():
+        info[marker] = list(reversed(values)) if len(values) == 5 else [""] * 5
     lines = ["編成情報", "", "キャラ名       ⚔️     ⭐     UE"]
     lines.extend(f"{name:<14} {info['⚔️'][i]:<5} {info['⭐'][i]:<5} {info['UE'][i]}"
                  for i, name in enumerate(names))
@@ -434,11 +475,129 @@ def validate_tl_record(record):
     code = record.get("code", "")
     if not code or not record.get("text"):
         return False
-    foreign = set(_ANY_CODE.findall(record["text"])) - {code}
+    # Parenthesized notes may legitimately reference another TL (for example
+    # ``see D3T04``). Only action text should trigger the cross-boss guard.
+    action_text = re.sub(r"\([^()]*\)", "", record["text"])
+    foreign = set(_ANY_CODE.findall(action_text)) - {code}
     if foreign:
         print(f"警告: {code} に別ボスコードが混入したため投稿を抑止: {sorted(foreign)}")
         return False
     return True
+
+
+def _render_post_text(record, post_text):
+    """Render update posts as separate git-style diff and current-body blocks."""
+    if record.get("status") != "updated":
+        return f"```scm\n{post_text}\n```"
+    if "【現行本文】" not in post_text:
+        return f"```scm\n{post_text}\n```"
+    diff_text, current_text = post_text.split("【現行本文】", 1)
+    diff_text = diff_text.strip()
+    current_text = current_text.strip()
+    if diff_text.startswith("【差分】"):
+        diff_text = diff_text[len("【差分】"):].strip()
+        diff_block = f"【差分】\n```diff\n{diff_text}\n```"
+    else:
+        diff_block = "【差分なし】"
+    return f"{diff_block}\n\n【現行本文】\n```scm\n{current_text}\n```"
+
+
+def _split_text_lines(text, limit):
+    """Split text on lines and hard-wrap only an overlong individual line."""
+    chunks = []
+    current = ""
+    for line in str(text or "").splitlines() or [""]:
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        candidate = line if not current else f"{current}\n{line}"
+        if current and len(candidate) > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current or not chunks:
+        chunks.append(current)
+    return chunks
+
+
+def build_worrychefs_split_messages(record, post_text, detected_at, limit=1950):
+    """Build attachment-free messages for TL bodies exceeding Discord's limit."""
+    image_links = formation_image_links(record)
+    header = (
+        f"[WorryChefs更新] {record['code']} ({record['source']})\n"
+        f"更新検知日時: {detected_at if record.get('status') == 'updated' else ''}\n"
+        f"参照: {record['url']}\n"
+        f"{image_links}\n" if image_links else ""
+        "TL本文（分割）\n"
+    )
+    payload_limit = max(100, limit - len(header) - 32)
+    chunks = _split_text_lines(post_text, payload_limit)
+    total = len(chunks)
+    return [
+        f"{header}分割 {index}/{total}\n```text\n{chunk}\n```"
+        for index, chunk in enumerate(chunks, start=1)
+    ]
+
+
+def formation_image_links(record):
+    """Render source portrait URLs so Discord can preview them without files."""
+    urls = list(dict.fromkeys(record.get("image_urls") or []))[:5]
+    if not urls:
+        return ""
+    labels = _formation_labels_cache.get(tuple(urls), [])
+    lines = ["編成画像（外部画像URL）"]
+    for index, url in enumerate(urls):
+        label = labels[index].strip() if index < len(labels) else ""
+        lines.append(f"{label}: {url}" if label else url)
+    return "\n".join(lines)
+
+
+def build_worrychefs_content(record, post_text, detected_at, limit=1950):
+    """Build one Discord message per TL without crossing Discord's limit."""
+    code = record["code"]
+    source = record["source"]
+    url = record["url"]
+    author = record.get("author") or "不明"
+    damage = record.get("damage") or "未記入"
+    rendered_post = _render_post_text(record, post_text)
+    full = (
+        f"[WorryChefs更新] {code} ({source})\n"
+        f"新規投稿日時: {record.get('first_seen', detected_at)}\n"
+        f"更新検知日時: {detected_at if record.get('status') == 'updated' else ''}\n"
+        f"参照スプシ: [シートを開く]({url})\n"
+        f"制作者: {author}\n"
+        f"ダメージ: {damage}\n\n"
+        f"{rendered_post}"
+    )
+    formation = f"\n\n```text\n{record['formation_md']}\n```" if record.get("formation_md") else ""
+    formation += f"\n\n{formation_image_links(record)}" if formation_image_links(record) else ""
+    candidates = [
+        full + formation,
+        (
+            f"[WorryChefs更新] {code} ({source})\n"
+            f"参照スプシ: [シートを開く]({url})\n"
+            f"制作者: {author} / ダメージ: {damage}\n\n"
+            f"{rendered_post}" + formation
+        ),
+        (
+            f"[WorryChefs更新] {code} ({source})\n"
+            f"参照: {url}\n"
+            f"{rendered_post}"
+        ),
+        (
+            f"[WorryChefs更新] {code} ({source})\n"
+            f"{rendered_post}" + formation
+        ),
+        (
+            f"[WorryChefs更新] {code}\n"
+            f"{rendered_post}" + formation
+        ),
+    ]
+    return next((candidate for candidate in candidates if len(candidate) <= limit), None)
 
 
 def compare_tl_records(rows, records):
@@ -453,6 +612,17 @@ def compare_tl_records(rows, records):
         if old is None:
             record["status"] = "new"
         elif len(old) < 3 or not old[2] or old[2] != record["hash"]:
+            # Older rows may have been hashed before English character names
+            # were translated.  Compare normalized visible text as a migration
+            # fallback so a name translation alone is not a full update.
+            old_text = old[1] if len(old) > 1 else ""
+            try:
+                old_normalized = canonicalize_tl(format_tl_text(old_text))
+            except (requests.RequestException, RuntimeError, KeyError, ValueError):
+                old_normalized = canonicalize_tl(old_text)
+            current_normalized = canonicalize_tl(record.get("text", ""))
+            if old_normalized == current_normalized:
+                continue
             record["status"] = "updated"
             record["previous_text"] = old[1] if len(old) > 1 else ""
         else:
@@ -499,6 +669,18 @@ def prepare_sheet_changes(sheet_rows, records, detected_at):
     return header, inserts, updates
 
 
+def record_matches_month(record, sheet_rows, target_month):
+    """Return whether a record belongs to the requested trial snapshot.
+
+    The published WorryChefs tabs contain TL layouts but no reliable source
+    publication date.  ``target_month`` is therefore a trial/snapshot label,
+    not a filter against the destination sheet's detection timestamp.  A TL
+    first collected in September can still be part of the August snapshot.
+    Keep the sheet argument for API compatibility with callers and tests.
+    """
+    return True
+
+
 def save_record_changes(sheet, header, inserts, updates):
     """Persist prepared changes using gspread's range update primitives."""
     if not sheet.get_all_values() or sheet.get_all_values()[0] != header:
@@ -511,61 +693,117 @@ def save_record_changes(sheet, header, inserts, updates):
         sheet.insert_rows(inserts, row=2, value_input_option="USER_ENTERED")
 
 
+def apply_alternating_post_modes(records, sheet_rows):
+    """Mark selected records alternately as full new posts and diff updates."""
+    existing = {
+        row[0]: row for row in (sheet_rows or [])[1:] if row and row[0]
+    }
+    counts = {"new": 0, "updated": 0}
+    for index, record in enumerate(records):
+        old = existing.get(record.get("key"))
+        if index % 2 == 0 or not old or len(old) <= 1:
+            record["status"] = "new"
+            record["force_full"] = True
+            record.pop("previous_text", None)
+            counts["new"] += 1
+            continue
+        record["status"] = "updated"
+        record["force_full"] = False
+        record["previous_text"] = old[1]
+        counts["updated"] += 1
+    return counts
+
+
+def format_previous_post_text(record):
+    """Normalize the stored old body before rendering an update diff."""
+    if record.get("status") == "updated" and record.get("previous_text"):
+        record["previous_text"] = format_tl_text(record["previous_text"])
+    return record
+
+
 def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
                                format_time=datetime.dateTime2String,
-                               reset_discord=False, target_code="D503", source_kind=None,
-                               force_post=False):
+                               reset_discord=False, target_code=None, source_kind=None,
+                               force_post=False, target_boss=None, target_month=None,
+                               alternate_new_update=False):
     """Collect configured WorryChefs sheets, persist diffs, and route Bot posts."""
+    test_only = bool(
+        reset_discord or force_post or alternate_new_update
+        or target_code or source_kind or target_boss or target_month
+    )
+    post_guild_keys = discord.configured_guild_keys(test_only=test_only)
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheet = ss.worksheet("WorryChefs TL")
-    if reset_discord:
-        deleted = discord.delete_worrychefs_posts()
-        print(f"WorryChefs既存投稿を削除: {deleted}件")
+    sheet_rows = sheet.get_all_values()
     records = collect_worrychefs_records(load_worrychefs_sources())
+    if target_month:
+        month_records = [record for record in records
+                         if record_matches_month(record, sheet_rows, target_month)]
+        print(f"WorryChefs対象月 {target_month}: {len(month_records)}件")
+        if not month_records:
+            print(f"停止: {target_month}の保存済みWorryChefs TLがないため、既存投稿は削除しません")
+            return records
+    if reset_discord:
+        channel_keys = [f"boss{target_boss}_tl"] if target_boss else None
+        deleted = 0
+        for guild_key in post_guild_keys:
+            deleted += discord.delete_worrychefs_posts(
+                guild_key=guild_key, channel_keys=channel_keys
+            )
+        print(f"WorryChefs既存投稿を削除: {deleted}件")
     detected_at = format_time(now_factory())
-    reference_month = detected_at[:7].replace("-", "/")
-    header, inserts, updates = prepare_sheet_changes(sheet.get_all_values(), records, detected_at)
-    if inserts or updates or (sheet.get_all_values() and sheet.get_all_values()[0] != header):
+    header, inserts, updates = prepare_sheet_changes(sheet_rows, records, detected_at)
+    if inserts or updates or (sheet_rows and sheet_rows[0] != header):
         save_record_changes(sheet, header, inserts, updates)
     # 通常時はシート上のハッシュで重複投稿を防止する。
-    # Discord投稿を削除して再構築するリセット時だけD503を強制投稿する。
+    # リセット時または明示的な強制投稿時は、選択フィルタ内の全件を投稿する。
     if reset_discord or force_post:
         changed_keys = {record["key"] for record in records
                         if (source_kind is None or record.get("source") == source_kind
                             or (source_kind == "manual" and str(record.get("source", "")).startswith("manual-")))
-                        and (target_code is None or str(record.get("code", "")).strip().upper() == target_code)}
-    else:
-        changed_keys = {record["key"] for record in records
-                        if (source_kind is None or record.get("source") == source_kind
-                            or (source_kind == "manual" and str(record.get("source", "")).startswith("manual-")))
                         and (target_code is None or str(record.get("code", "")).strip().upper() == target_code)
-                        and record.get("status") in {"new", "updated"}}
+                        and record_matches_month(record, sheet_rows, target_month)
+                        and (target_boss is None or str(record.get("code", "")).strip().upper().startswith(f"D{target_boss}"))}
+    else:
+        changed_keys = {
+            record["key"] for record in records
+            if (source_kind is None or record.get("source") == source_kind
+                or (source_kind == "manual" and str(record.get("source", "")).startswith("manual-")))
+            and (target_code is None or str(record.get("code", "")).strip().upper() == target_code)
+            and record_matches_month(record, sheet_rows, target_month)
+            and (target_boss is None or str(record.get("code", "")).strip().upper().startswith(f"D{target_boss}"))
+            and record.get("status") in {"new", "updated"}
+        }
+    selected_records = [record for record in records if record["key"] in changed_keys]
+    if alternate_new_update:
+        counts = apply_alternating_post_modes(selected_records, sheet_rows)
+        print(f"交互投稿計画: 新規{counts['new']}件 更新{counts['updated']}件")
+    for record in selected_records:
+        format_previous_post_text(record)
     for record in records:
         if os.environ.get("PRICONNER_NO_POST"):
             continue
         if record["key"] not in changed_keys:
             continue
+        if (reset_discord or force_post) and not alternate_new_update:
+            record["force_full"] = True
         post_text = post_tracker.post_content(record)
-        content = (f"[WorryChefs更新] {record['code']} ({record['source']})\n"
-                   f"新規投稿日時: {record.get('first_seen', detected_at)}\n"
-                   f"更新検知日時: {detected_at if record.get('status') == 'updated' else ''}\n"
-                   f"参照スプシ: [シートを開く]({record['url']})\n"
-                   f"制作者: {record.get('author') or '不明'}\n"
-                   f"ダメージ: {record['damage'] or '未記入'}\n\n"
-                   f"```scm\n{post_text}\n```")
-        if record.get("formation_md"):
-            content += f"\n\n```text\n{record['formation_md']}\n```"
-        set_md = ""
-        if set_md:
-            content += f"\n\n```text\n{set_md}\n```"
-        image = None
+        content = build_worrychefs_content(record, post_text, detected_at)
+        if content is None:
+            messages = build_worrychefs_split_messages(record, post_text, detected_at)
+        else:
+            messages = [content]
         try:
-            image = combined_formation_image(record.get("image_urls", []))
-        except Exception as error:
-            print(f"警告: 編成画像取得失敗 {record['key']}: {error}")
-        files = {"files[0]": (f"{record['code']}_formation.png", image, "image/png")} if image else None
-        try:
-            discord.post_for_boss(record["code"], content, files=files)
+            if target_boss is not None:
+                record_boss = str(record.get("code", "")).strip().upper()[1:2]
+                if record_boss != str(target_boss):
+                    print(f"警告: 試験担当外の投稿を抑止: {record['key']}")
+                    continue
+            for message in messages:
+                for guild_key in post_guild_keys:
+                    discord.post_for_boss(
+                        record["code"], message, guild_key=guild_key
+                    )
         except Exception as error:
             print(f"失敗: WorryChefs Discord通知 {record['key']}: {error}")
     return records
@@ -871,14 +1109,15 @@ def save_tl_values(sheet, values):
 def notify_tl_values(notify, link_url, values):
     if not values:
         return
-    tl_values = [
-        row for row in values
-        if row and _is_target_code(str(row[0]).split(",", 1)[0])
-    ]
+    tl_values = [row for row in values if row]
     if not tl_values:
         return
     text = "\n".join(row[0] for row in tl_values)
-    notify(f"[WorryChefs]({link_url})\n```cs\n{text}```")
+    content = f"[WorryChefs]({link_url})\n```cs\n{text}```"
+    if notify is discord.notify:
+        discord.notify_to_configured_guilds(content)
+    else:
+        notify(content)
 
 
 def checkNewArrivalsForWorryChefs(
@@ -967,16 +1206,30 @@ def main():
         import sys
         reset = "--reset-posts" in sys.argv
         force = "--force" in sys.argv
-        target = "D503"
+        alternate = "--alternate-new-update" in sys.argv
+        target = None
         source = None
+        boss = None
+        month = None
         if "--code" in sys.argv:
             target = sys.argv[sys.argv.index("--code") + 1].strip().upper()
         if "--source" in sys.argv:
             source = sys.argv[sys.argv.index("--source") + 1].strip().lower()
             if "--code" not in sys.argv:
                 target = None
+        if "--boss" in sys.argv:
+            boss = sys.argv[sys.argv.index("--boss") + 1].strip()
+            if boss not in {"1", "2", "3", "4", "5"}:
+                raise ValueError("--boss must be one of 1, 2, 3, 4, or 5")
+            target = None
+        if "--month" in sys.argv:
+            month = sys.argv[sys.argv.index("--month") + 1].strip().replace("-", "/")
+            if not re.fullmatch(r"\d{4}/\d{2}", month):
+                raise ValueError("--month must be YYYY/MM")
         scan_configured_worrychefs(reset_discord=reset, target_code=target,
-                                   source_kind=source, force_post=force)
+                                   source_kind=source, force_post=force,
+                                   target_boss=boss, target_month=month,
+                                   alternate_new_update=alternate)
 
         print("-----------------------------------------------")
         print(f"終了{datetime.nowString()}")

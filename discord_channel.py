@@ -1,7 +1,7 @@
-"""Scrape YouTube links from configured Discord server channels."""
+"""Collect configured Discord posts and publish new or changed items."""
 
-import os
 import hashlib
+import os
 import re
 import time
 from datetime import datetime as DateTime
@@ -16,7 +16,7 @@ import gspread_utils as gspread
 import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
-from tl_formatting import format_discord_tl
+from tl_formatting import extract_tl_text, format_discord_tl
 
 DISCORD_API = "https://discord.com/api/v10"
 WAIT_TIME = 0
@@ -27,6 +27,11 @@ DEFAULT_RETRIES = 2
 
 YOUTUBE_URL_PATTERN = re.compile(
     r"https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?v=|shorts/|live/)|youtu\.be/)[A-Za-z0-9_-]+"
+)
+GENERIC_URL_PATTERN = re.compile(r"https?://[^\s<>]+")
+BOSS_CODE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])D([1-5])(?:\d{1,2}|T\d{2})?(?![A-Za-z0-9])",
+    re.IGNORECASE,
 )
 
 
@@ -59,6 +64,7 @@ def fetch_channel_messages(
     channel_id,
     token,
     limit=DEFAULT_LIMIT,
+    before=None,
     timeout=DEFAULT_TIMEOUT,
     retries=DEFAULT_RETRIES,
     retry_sleep=time.sleep,
@@ -73,7 +79,7 @@ def fetch_channel_messages(
         try:
             response = http_get(
                 url,
-                params={"limit": limit},
+                params={"limit": limit, **({"before": before} if before else {})},
                 headers=headers,
                 timeout=timeout,
             )
@@ -88,6 +94,51 @@ def fetch_channel_messages(
                 return None
             retry_sleep(2**attempt)
     return None
+
+
+def fetch_channel_messages_for_month(
+    channel_id,
+    token,
+    target_month,
+    limit=DEFAULT_LIMIT,
+    timeout=DEFAULT_TIMEOUT,
+    retries=DEFAULT_RETRIES,
+    retry_sleep=time.sleep,
+    http_get=requests.get,
+):
+    """Fetch every page that can contain messages in the target month."""
+    collected = []
+    before = None
+    while True:
+        page = fetch_channel_messages(
+            channel_id,
+            token,
+            limit=limit,
+            before=before,
+            timeout=timeout,
+            retries=retries,
+            retry_sleep=retry_sleep,
+            http_get=http_get,
+        )
+        if not page:
+            break
+        collected.extend(
+            message for message in page if _is_target_month(message, target_month)
+        )
+        timestamps = [_message_timestamp(message) for message in page]
+        older_than_target = any(
+            timestamp is not None
+            and (timestamp.year, timestamp.month) < target_month
+            for timestamp in timestamps
+        )
+        if len(page) < limit or older_than_target:
+            break
+        next_before = str(page[-1].get("id") or "")
+        if not next_before or next_before == before:
+            break
+        before = next_before
+        retry_sleep(1)
+    return collected
 
 
 def _normalize_youtube_url(url):
@@ -117,8 +168,143 @@ def extract_youtube_urls(message):
     return sorted({_normalize_youtube_url(url) for url in urls})
 
 
+def extract_message_urls(message):
+    """Collect ordinary URLs from text, embeds, and attachments."""
+    urls = set()
+    values = [(message.get("content") or "")]
+    for embed in message.get("embeds") or []:
+        values.extend(embed.get(key) or "" for key in ("url", "video_url", "description"))
+    values.extend(
+        attachment.get("url") or "" for attachment in message.get("attachments") or []
+    )
+    for value in values:
+        urls.update(GENERIC_URL_PATTERN.findall(value))
+    return sorted(url.rstrip(".,)>]}") for url in urls)
+
+
+def message_bosses(message):
+    values = [message.get("content") or ""]
+    for embed in message.get("embeds") or []:
+        values.extend(
+            embed.get(key) or "" for key in ("title", "description", "url")
+        )
+    return {
+        int(match.group(1))
+        for value in values
+        for match in BOSS_CODE_PATTERN.finditer(value)
+    }
+
+
+def _forced_boss_number():
+    channel = os.environ.get("PRICONNER_POST_CHANNEL", "").strip().lower()
+    match = re.fullmatch(r"boss([1-5])_tl", channel)
+    return int(match.group(1)) if match else None
+
+
+def _source_channel_boss(channel_id):
+    """Map the four source-channel groups ending ①..⑤ to bosses 1..5."""
+    channel_ids = _channel_ids()
+    try:
+        index = channel_ids.index(str(channel_id))
+    except ValueError:
+        return None
+    return index % 5 + 1 if index < 20 else None
+
+
+SOURCE_CHANNEL_NAMES = {
+    # The source-channel list is intentionally kept in config order.  These
+    # names make copied Discord posts useful to readers; an ID alone is not.
+    "888411637185388585": "四段セミオ_①",
+    "888415796617965618": "四段セミオ_②",
+    "888415902394105906": "四段セミオ_③",
+    "888416089074200597": "四段セミオ_④",
+    "888417056351989790": "四段セミオ_⑤",
+    "888411707918123018": "四段_①セミオ相談",
+    "888415864355954708": "四段_②セミオ相談",
+    "888416041351409704": "四段_③セミオ相談",
+    "888417120428384297": "四段_④セミオ相談",
+    "889752971594829844": "四段手動_②",
+    "890430547833286676": "四段手動_②相談",
+}
+
+
+def _source_channel_label(channel_id):
+    """Return a human-readable source channel label with a safe fallback."""
+    return SOURCE_CHANNEL_NAMES.get(str(channel_id), f"チャンネル {channel_id}")
+
+
+def _non_tl_context(content):
+    raw_tl = extract_tl_text(content or "")
+    if not raw_tl:
+        return (content or "").strip()
+    tl_lines = set(raw_tl.splitlines())
+    return "\n".join(
+        line for line in (content or "").splitlines() if line.rstrip() not in tl_lines
+    ).strip()
+
+
+def _message_timestamp(message):
+    value = message.get("timestamp") or ""
+    try:
+        return DateTime.fromisoformat(value.replace("Z", "+00:00")).astimezone(datetime.JST)
+    except (TypeError, ValueError):
+        return None
+
+
+def _target_month(now_factory):
+    value = os.environ.get("PRICONNER_DISCORD_TARGET_MONTH", "").strip()
+    if value:
+        try:
+            year, month = (int(part) for part in value.split("-", 1))
+            if 1 <= month <= 12:
+                return year, month
+        except (TypeError, ValueError):
+            print(f"警告: 対象月を解釈できません: {value}")
+    current = now_factory()
+    return current.year, current.month
+
+
+def _is_target_month(message, target_month):
+    timestamp = _message_timestamp(message)
+    # Real Discord payloads always include a timestamp; keep hand-built/test
+    # payloads processable when that optional field is absent.
+    return timestamp is None or (timestamp.year, timestamp.month) == target_month
+
+
+def _post_channel_key(content, source_boss=None):
+    forced = os.environ.get("PRICONNER_POST_CHANNEL", "").strip()
+    if forced:
+        return forced
+    if source_boss in range(1, 6):
+        return f"boss{source_boss}_tl"
+    bosses = {
+        int(match.group(1))
+        for match in BOSS_CODE_PATTERN.finditer(content or "")
+    }
+    return f"boss{next(iter(bosses))}_tl" if len(bosses) == 1 else "boss0_tl"
+
+
+def _post_to_assigned_boss(post, content, source_boss=None):
+    if post is discord.post:
+        return discord.post_to_configured_guilds(
+            content, channel_key=_post_channel_key(content, source_boss)
+        )
+    return post(content)
+
+
+def _notify_assigned_boss(notify, content):
+    if notify is discord.notify:
+        return discord.notify_to_configured_guilds(
+            content,
+            channel_key=os.environ.get("PRICONNER_POST_CHANNEL", "boss0_tl"),
+        )
+    return notify(content)
+
+
 def fetch_video_info(url):
     """Fetch lightweight metadata for one YouTube URL."""
+    if os.environ.get("PRICONNER_SKIP_VIDEO_INFO"):
+        return {"title": url, "publish_date": None, "channel_name": ""}
     options = {
         "quiet": True,
         "skip_download": True,
@@ -171,6 +357,17 @@ def checkNewArrivalsForDiscordChannel(
         "discord_channel", "limit", DEFAULT_LIMIT, minimum=1, maximum=MAX_LIMIT
     )
     scan_time = datetime.dateTime2String(now_factory())
+    target_month = _target_month(now_factory)
+    print(f"Discord対象月: {target_month[0]:04d}-{target_month[1]:02d}")
+
+    if os.environ.get("PRICONNER_RESET_POSTS"):
+        post_channel = os.environ.get("PRICONNER_POST_CHANNEL", "").strip().lower()
+        if not re.fullmatch(r"boss[1-5]_tl", post_channel):
+            raise ValueError(
+                "PRICONNER_RESET_POSTS requires PRICONNER_POST_CHANNEL=boss1_tl..boss5_tl"
+            )
+        deleted = discord.delete_bot_messages(channel_keys=[post_channel])
+        print(f"Discord収集投稿を削除: チャンネル={post_channel} 件数={deleted}")
 
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     known_urls = set(gspread.getDamagesSheet().worksheet("Youtube").col_values(1))
@@ -180,12 +377,21 @@ def checkNewArrivalsForDiscordChannel(
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
     processed_urls = set()
     new_urls = []
+    pending_tracking_updates = []
+    pending_tracking_inserts = []
+    post_success = 0
+    post_failures = []
+    forced_boss = _forced_boss_number()
 
     for channel_id in channel_ids:
+        source_boss = _source_channel_boss(channel_id)
+        if forced_boss is not None and source_boss != forced_boss:
+            continue
         print(f"DiscordチャンネルID「{channel_id}」")
-        messages = fetch_channel_messages(
+        messages = fetch_channel_messages_for_month(
             channel_id,
             token,
+            target_month,
             limit=limit,
             timeout=timeout,
             retries=retries,
@@ -195,20 +401,52 @@ def checkNewArrivalsForDiscordChannel(
         if not messages:
             continue
         for message in messages:
-            message_content = (message.get("content") or "")[:500]
-            for url in extract_youtube_urls(message):
-                if url in processed_urls:
+            if not _is_target_month(message, target_month):
+                continue
+            if forced_boss is not None:
+                codes = message_bosses(message)
+                if source_boss is not None:
+                    if source_boss != forced_boss or (codes and codes != {forced_boss}):
+                        continue
+                elif codes != {forced_boss}:
                     continue
-                processed_urls.add(url)
-                was_known = url in known_urls
-                known_urls.add(url)
-                info = video_info_factory(url)
-                title = info.get("title") or url
+            message_content = (message.get("content") or "")[:500]
+            youtube_urls = extract_youtube_urls(message)
+            message_id = str(message.get("id") or "")
+            discord_post_url = (
+                f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
+                if message_id
+                else ""
+            )
+            records = [(url, url, True) for url in youtube_urls]
+            if not youtube_urls:
+                message_key = message_id or hashlib.sha256(
+                    (channel_id + "\n" + message_content).encode("utf-8")
+                ).hexdigest()
+                tracking_key = f"discord://{channel_id}/{message_key}"
+                discord_url = (
+                    discord_post_url
+                    if message_id
+                    else tracking_key
+                )
+                records = [(tracking_key, discord_url, False)]
+            for tracking_key, source_url, is_youtube in records:
+                if tracking_key in processed_urls:
+                    continue
+                processed_urls.add(tracking_key)
+                was_known = tracking_key in known_urls
+                if is_youtube:
+                    known_urls.add(tracking_key)
+                    info = video_info_factory(source_url)
+                    title = info.get("title") or source_url
+                else:
+                    info = {"publish_date": None, "channel_name": "Discord"}
+                    title = f"Discord投稿 {message.get('id') or channel_id}"
                 publish_date = info.get("publish_date")
                 write_arrival(
                     "discord-channel",
                     title,
-                    url,
+                    source_url,
                     publish_date,
                     channel_name=info.get("channel_name", ""),
                     notes=(
@@ -218,6 +456,7 @@ def checkNewArrivalsForDiscordChannel(
                     details={
                         "Discordメッセージ": message_content,
                         "検出時刻": scan_time,
+                        "投稿URL": source_url,
                     },
                 )
                 formatted_tl = ""
@@ -225,22 +464,79 @@ def checkNewArrivalsForDiscordChannel(
                     formatted_tl = format_discord_tl(message.get("content") or "")
                 except RuntimeError as error:
                     print(f"警告: TLフォーマッタを利用できません: {error}")
-                body = (
-                    f"動画タイトル: {title}\n"
-                    "備考: Discordメッセージから検出\n"
-                    f"動画URL: {url}"
+                author_data = message.get("author") or {}
+                author_name = (
+                    author_data.get("global_name")
+                    or author_data.get("display_name")
+                    or author_data.get("username")
+                    or author_data.get("id")
+                    or "（不明）"
                 )
-                if formatted_tl:
-                    body += f"\n\n{formatted_tl}"
-                comparison = post_tracker.comparison_text(
-                    f"動画タイトル: {title}",
-                    "備考: Discordメッセージから検出",
-                    formatted_tl,
+                source_timestamp = _message_timestamp(message)
+                source_time = (
+                    source_timestamp.strftime("%Y-%m-%d %H:%M:%S %Z")
+                    if source_timestamp else "（不明）"
                 )
+                source_channel_name = _source_channel_label(channel_id)
+                source_channel_link = (
+                    f"https://discord.com/channels/{guild_id}/{channel_id}"
+                    if guild_id and channel_id
+                    else ""
+                )
+                source_channel_text = (
+                    f"[{source_channel_name}]({source_channel_link})"
+                    if source_channel_link
+                    else source_channel_name
+                )
+                metadata = (
+                    f"投稿者: {author_name}\n"
+                    f"元投稿日時: {source_time}\n"
+                    f"チャンネル: {source_channel_text}\n"
+                    f"検出日時: {scan_time}"
+                )
+                if is_youtube:
+                    source_link = (
+                        f"\n投稿元リンク: {discord_post_url}"
+                        if discord_post_url else ""
+                    )
+                    body = (
+                        f"{metadata}\n"
+                        f"動画タイトル: {title}\n"
+                        f"動画URL: {source_url}\n"
+                        f"{post_tracker.markdown_note_line('Discordメッセージから検出')}\n"
+                        f"{source_link}"
+                    )
+                    if formatted_tl:
+                        formatted_body = post_tracker.add_post_separator(
+                            f"{body}\n\nTL（整形済み）:\n```scm\n"
+                            f"{formatted_tl}\n```"
+                        )
+                        if len(formatted_body) <= 1950:
+                            body = formatted_body
+                else:
+                    raw_message = (message.get("content") or "").strip()
+                    source_link = (
+                        f"\n投稿元リンク: {discord_post_url}"
+                        if discord_post_url else ""
+                    )
+                    body = (
+                        f"{metadata}\n"
+                        f"Discord投稿本文: {raw_message or '（本文なし）'}"
+                        f"{source_link}"
+                    )
+                    if formatted_tl:
+                        formatted_body = post_tracker.add_post_separator(
+                            f"{body}\n\nTL（整形済み）:\n```scm\n"
+                            f"{formatted_tl}\n```"
+                        )
+                        if len(formatted_body) <= 1950:
+                            body = formatted_body
+                body = post_tracker.add_post_separator(body)
+                comparison = post_tracker.comparison_text(body)
                 digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
-                old = tracking_by_url.get(url)
+                old = tracking_by_url.get(tracking_key)
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
-                row = [url, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
+                row = [tracking_key, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
                 if was_known and not old:
                     status = "same"
                 else:
@@ -251,28 +547,50 @@ def checkNewArrivalsForDiscordChannel(
                     status = "new"
                 if status == "same":
                     if not old:
-                        if hasattr(tracking, "insert_rows"):
-                            tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
-                        tracking_by_url[url] = (2, row)
+                        pending_tracking_inserts.append(row)
                     continue
-                if old and not os.environ.get("PRICONNER_FORCE_NEW_POST") and hasattr(tracking, "update"):
-                    tracking.update(f"A{old[0]}:H{old[0]}", [row], value_input_option="USER_ENTERED")
-                    tracking_by_url[url] = (old[0], row)
-                elif not old and hasattr(tracking, "insert_rows"):
-                    tracking.insert_rows([row], row=2, value_input_option="USER_ENTERED")
-                    tracking_by_url[url] = (2, row)
-                new_urls.append({"url": url, "text": body, "status": status, "previous_text": previous})
-                print(f"new: {url}")
+                if old and not os.environ.get("PRICONNER_FORCE_NEW_POST"):
+                    pending_tracking_updates.append((old[0], row))
+                elif not old:
+                    pending_tracking_inserts.append(row)
+                new_urls.append({"url": source_url, "tracking_key": tracking_key, "is_youtube": is_youtube, "source_boss": source_boss, "text": body, "status": status, "previous_text": previous})
+                print(f"new: {source_url}")
         retry_sleep(wait_time)
 
+    if pending_tracking_updates:
+        if hasattr(tracking, "batch_update"):
+            tracking.batch_update(
+                [
+                    {"range": f"A{row_number}:H{row_number}", "values": [row]}
+                    for row_number, row in pending_tracking_updates
+                ],
+                raw=False,
+                value_input_option="USER_ENTERED",
+            )
+        elif hasattr(tracking, "update"):
+            for row_number, row in pending_tracking_updates:
+                tracking.update(
+                    f"A{row_number}:H{row_number}",
+                    [row],
+                    value_input_option="USER_ENTERED",
+                )
+    if pending_tracking_inserts and hasattr(tracking, "insert_rows"):
+        tracking.insert_rows(
+            pending_tracking_inserts,
+            row=2,
+            value_input_option="USER_ENTERED",
+        )
+
     if not new_urls:
+        print("Discord投稿結果: 成功0件 失敗0件 対象0件")
         return
 
     sheet = gspread.getDamagesSheet().worksheet("Youtube")
     gspread.writeToFirstEmptyCells(
         sheet,
         [item["url"] for item in new_urls
-         if item.get("status") == "new" and item["url"] not in initial_known_urls],
+         if item.get("is_youtube") and item.get("status") == "new"
+         and item["url"] not in initial_known_urls],
         wait_time=WAIT_TIME,
     )
 
@@ -282,13 +600,28 @@ def checkNewArrivalsForDiscordChannel(
         if os.environ.get("PRICONNER_NO_POST"):
             continue
         try:
-            post(post_tracker.post_content(item))
+            _post_to_assigned_boss(
+                post,
+                post_tracker.post_content(item),
+                item.get("source_boss"),
+            )
+            post_success += 1
         except Exception as error:
+            post_failures.append((item["url"], str(error)))
             print(f"失敗: Discord URL通知 {item['url']}: {error}")
         retry_sleep(wait_time)
 
+    status_counts = {}
+    for item in post_items:
+        status_counts[item["status"]] = status_counts.get(item["status"], 0) + 1
+    print(
+        "Discord投稿結果: "
+        f"成功{post_success}件 失敗{len(post_failures)}件 "
+        f"状態={status_counts}"
+    )
+
     try:
-        notify(f"Discord新着{len(new_urls)}件")
+        _notify_assigned_boss(notify, f"Discord新着{len(new_urls)}件")
     except Exception as error:
         print(f"失敗: Discord集計通知: {error}")
 
