@@ -27,4 +27,5 @@ python=python3
 markdown_output_dir=
 
 [maintenance]
-inactive_days=90
+# 登録チャンネルを通常走査する最終確認日の有効期間
+inactive_days=60

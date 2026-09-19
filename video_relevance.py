@@ -1,5 +1,6 @@
 """Conservative relevance scoring for Princess Connect videos."""
 
+import re
 import unicodedata
 
 MAX_DESCRIPTION_LENGTH = 5000
@@ -26,6 +27,11 @@ NEGATIVE_GAME_TERMS = (
     "パズドラ",
     "valorant",
     "minecraft",
+)
+
+CLAN_BATTLE_TITLE_PATTERN = re.compile(
+    r"(?i)(?:クラバト|クランバトル|clan\s*battle|4\s*段階|"
+    r"[1-5]\s*ボス|\bD[1-5]\d{1,2}P?\b|\bEX\s*[1-5]\b)"
 )
 
 
@@ -58,3 +64,8 @@ def relevance_score(video, boss_names=()):
 def is_relevant_video(video, boss_names=()):
     """Return true for likely Princess Connect/TL videos."""
     return relevance_score(video, boss_names) >= 4
+
+
+def is_clan_battle_video(video):
+    """Return whether a title has an accepted clan-battle marker."""
+    return bool(CLAN_BATTLE_TITLE_PATTERN.search(str(getattr(video, "title", "") or "")))

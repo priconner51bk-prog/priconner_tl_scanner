@@ -29,7 +29,7 @@ def test_find_youtube_video_records_new_video_and_channel():
     now = datetime(2026, 9, 10, tzinfo=timezone.utc)
     video = SimpleNamespace(
         watch_url="https://www.youtube.com/watch?v=new",
-        title="Priconne TL",
+        title="プリコネ クラバト 4段階目 TL",
         description="Priconne TL video",
         tags=["tl"],
         publish_date=now - timedelta(hours=1),
@@ -48,8 +48,9 @@ def test_find_youtube_video_records_new_video_and_channel():
         }[name]
     )
 
-    with patch.object(
-        youtube_search.gspread, "get_int_config_value", return_value=7
+    with (
+        patch.object(youtube_search.gspread, "get_int_config_value", return_value=7),
+        patch.object(youtube_search.gspread, "get_config_value", return_value="days"),
     ):
         youtube_search.findYouTubeVideo(
             spreadsheet=spreadsheet,
@@ -59,6 +60,7 @@ def test_find_youtube_video_records_new_video_and_channel():
             notify=lambda *_args: None,
             write_urls=lambda *_args: None,
             sleep=lambda *_args: None,
+            now_factory=lambda: now,
         )
 
     assert len(video_sheet.inserted) == 1
@@ -114,3 +116,48 @@ def test_find_youtube_video_skips_irrelevant_and_known():
 
     assert video_sheet.inserted == []
     assert channel_sheet.inserted == []
+
+
+def test_find_youtube_video_routes_summary_to_selected_boss():
+    now = datetime(2026, 8, 29, tzinfo=timezone.utc)
+    video = SimpleNamespace(
+        watch_url="https://www.youtube.com/watch?v=summary",
+        title="BossA 4段階目 TL",
+        description="BossA プリコネ TL",
+        tags=["tl"],
+        publish_date=now - timedelta(hours=1),
+        channel_id="ch-summary",
+        channel_url="https://www.youtube.com/channel/ch-summary",
+    )
+    channel_sheet = FakeSheet([["h"] * 7])
+    video_sheet = FakeSheet([["h"] * 5])
+    boss_sheet = FakeSheet([["h"], ["BossA"]])
+    spreadsheet = SimpleNamespace(
+        worksheet=lambda name: {
+            "YouTubeチャンネル": channel_sheet,
+            "YouTube動画": video_sheet,
+            "ボス名": boss_sheet,
+        }[name]
+    )
+    notified = []
+
+    def notify(text, **kwargs):
+        notified.append((text, kwargs))
+
+    with (
+        patch.dict("os.environ", {"PRICONNER_YOUTUBE_BOSS_INDEX": "1"}, clear=False),
+        patch.object(youtube_search.gspread, "get_int_config_value", return_value=7),
+        patch.object(youtube_search.gspread, "get_config_value", return_value="days"),
+    ):
+        youtube_search.findYouTubeVideo(
+            spreadsheet=spreadsheet,
+            search_factory=lambda keywords: [video],
+            channel_factory=lambda url: SimpleNamespace(channel_name="chan"),
+            post=lambda *_args, **_kwargs: None,
+            notify=notify,
+            write_urls=lambda *_args: None,
+            sleep=lambda *_args: None,
+            now_factory=lambda: now,
+        )
+
+    assert notified == [("Youtube新着1件", {"channel_key": "boss1_tl"})]

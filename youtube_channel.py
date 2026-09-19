@@ -13,6 +13,7 @@ import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from tl_formatting import format_discord_tl
+from video_relevance import is_clan_battle_video
 from youtube_common import (
     as_utc,
     is_in_youtube_period,
@@ -225,6 +226,9 @@ def checkNewArrivalsForYouTube(
     )
     period_mode = gspread.get_config_value("youtube", "period_mode", "days")
     period_month = gspread.get_config_value("youtube", "period_month", "")
+    inactive_days = gspread.get_int_config_value(
+        "maintenance", "inactive_days", 60, minimum=1
+    )
     now = _as_utc(now_factory())
     period_start, period_end = youtube_period_bounds(
         now, period_days, period_mode, period_month
@@ -239,6 +243,16 @@ def checkNewArrivalsForYouTube(
         ignore = row[6] if len(row) > 6 else ""
         if len(ignore) > 0:
             continue
+
+        latest_video = row[4] if len(row) > 4 else ""
+        if latest_video:
+            try:
+                latest_video_at = _as_utc(datetime.string2DateTime(latest_video))
+            except (TypeError, ValueError):
+                latest_video_at = None
+            if latest_video_at and (now - latest_video_at).total_seconds() > inactive_days * 86400:
+                print(f"skip: inactive registered channel ({inactive_days} days since latest video): {row[2]}")
+                continue
 
         channelName = row[2]
         print(f"YouTubeチャンネル名「{channelName}」")
@@ -281,6 +295,9 @@ def checkNewArrivalsForYouTube(
                     continue
 
                 print(f"videoUrl:{videoUrl}")
+                if not is_clan_battle_video(yt):
+                    print("skip: not a clan-battle title")
+                    continue
                 description = getattr(yt, "description", "")
                 formatted_tl = _format_youtube_tl(description)
 

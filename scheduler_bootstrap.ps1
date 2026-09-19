@@ -16,14 +16,11 @@ $principal = New-ScheduledTaskPrincipal `
     -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
     -MultipleInstances IgnoreNew
 
 $definitions = @(
-    @{ Name = "YouTubeSearch"; Stage = "youtube-search"; Minutes = 5; Start = "12:00" }
-    @{ Name = "DiscordChannel"; Stage = "discord-channel"; Minutes = 5; Start = "12:01" }
-    @{ Name = "WorryChefs"; Stage = "worrychefs"; Minutes = 10; Start = "12:02" }
-    @{ Name = "YouTubeChannel"; Stage = "youtube-channel"; Minutes = 30; Start = "12:03" }
+    @{ Name = "Collector"; Stage = ""; Minutes = 30; Start = "12:00" }
 )
 
 foreach ($definition in $definitions) {
@@ -32,9 +29,13 @@ foreach ($definition in $definitions) {
         continue
     }
 
+    $runnerArguments = "`"$runner`""
+    if ($definition.Stage) {
+        $runnerArguments += " --stages $($definition.Stage)"
+    }
     $action = New-ScheduledTaskAction `
         -Execute $python `
-        -Argument "`"$runner`" --stages $($definition.Stage)" `
+        -Argument $runnerArguments `
         -WorkingDirectory $repo
 
     if ($today.Day -ge 22) {
@@ -56,5 +57,27 @@ foreach ($definition in $definitions) {
         -Settings $settings `
         -Principal $principal `
         -Description "Run $($definition.Stage) for $($today.ToString('yyyy-MM-dd'))." `
+        -Force | Out-Null
+}
+
+$queueTaskName = "$taskPrefix-DiscordQueue-$dateKey"
+if (-not (Get-ScheduledTask -TaskName $queueTaskName -TaskPath "\" -ErrorAction SilentlyContinue)) {
+    $queueAction = New-ScheduledTaskAction `
+        -Execute $python `
+        -Argument "`"$repo\discord_queue.py`"" `
+        -WorkingDirectory $repo
+    $queueTrigger = New-ScheduledTaskTrigger `
+        -Once `
+        -At $today.Date.AddMinutes(1) `
+        -RepetitionInterval (New-TimeSpan -Minutes 1) `
+        -RepetitionDuration (New-TimeSpan -Days 1)
+    Register-ScheduledTask `
+        -TaskName $queueTaskName `
+        -TaskPath "\" `
+        -Action $queueAction `
+        -Trigger $queueTrigger `
+        -Settings $settings `
+        -Principal $principal `
+        -Description "Drain the Discord post queue for $($today.ToString('yyyy-MM-dd'))." `
         -Force | Out-Null
 }

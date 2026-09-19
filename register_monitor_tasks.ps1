@@ -8,10 +8,18 @@ if (-not $pythonCommand) {
 $python = $pythonCommand.Source
 $bootstrap = Join-Path $repo "scheduler_bootstrap.ps1"
 $taskPrefix = "PriconnerTlScanner-"
-$oldTaskNames = @("YouTubeSearch", "DiscordChannel", "WorryChefs", "YouTubeChannel")
+$oldTaskNames = @("YouTubeSearch", "DiscordChannel", "WorryChefs", "YouTubeChannel", "Collector", "DiscordQueue")
 foreach ($oldTaskName in $oldTaskNames) {
     Unregister-ScheduledTask -TaskName "$taskPrefix$oldTaskName" -TaskPath "\" -Confirm:$false -ErrorAction SilentlyContinue
 }
+Get-ScheduledTask -TaskPath "\" -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.TaskName -like "$taskPrefix*" -and
+        $_.TaskName -match "-(YouTubeSearch|DiscordChannel|WorryChefs|YouTubeChannel)-\d{8}$"
+    } |
+    ForEach-Object {
+        Unregister-ScheduledTask -TaskName $_.TaskName -TaskPath "\" -Confirm:$false -ErrorAction SilentlyContinue
+    }
 Unregister-ScheduledTask -TaskName "$taskPrefix-Bootstrap" -TaskPath "\" -Confirm:$false -ErrorAction SilentlyContinue
 foreach ($day in 20..30) {
     Unregister-ScheduledTask -TaskName "$taskPrefix-Bootstrap-$day" -TaskPath "\" -Confirm:$false -ErrorAction SilentlyContinue

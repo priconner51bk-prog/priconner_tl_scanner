@@ -13,7 +13,7 @@ import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from tl_formatting import format_discord_tl
-from video_relevance import is_relevant_video
+from video_relevance import is_clan_battle_video, is_relevant_video
 from youtube_common import (
     as_utc,
     is_in_youtube_period,
@@ -232,6 +232,12 @@ def findYouTubeVideo(
     known_video_urls = set(videoUrls)
     video_rows = {row[4]: (index, row) for index, row in enumerate(sheetVideo.get_all_values()[1:], start=2) if len(row) > 4 and row[4]}
     channelIds = sheetChannel.col_values(2)
+    channel_rows = {
+        row[1]: (index, row)
+        for index, row in enumerate(sheetChannel.get_all_values()[1:], start=2)
+        if len(row) > 1 and row[1]
+    }
+    channel_refreshes = {}
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
@@ -283,6 +289,9 @@ def findYouTubeVideo(
             if not is_relevant_video(video, (bossName,)):
                 print("skip: not a likely Princess Connect video")
                 continue
+            if not is_clan_battle_video(video):
+                print("skip: not a clan-battle title")
+                continue
 
             channelUrl = video.channel_url
             if not channelUrl or not video.channel_id:
@@ -294,6 +303,13 @@ def findYouTubeVideo(
             videoTitle = video.title
             publishDate = datetime.dateTime2String(video.publish_date)
             channelId = video.channel_id
+
+            if channelId in channel_rows:
+                channel_refreshes[channelId] = (
+                    channel_rows[channelId][0],
+                    video.publish_date,
+                    nowScanTime,
+                )
 
             if channelUrl not in channel_name_cache:
                 channel_name_cache[channelUrl] = channel_factory(
@@ -335,6 +351,17 @@ def findYouTubeVideo(
 
     if channel_values:
         sheetChannel.insert_rows(channel_values, row=2)
+    for row_number, publish_date, scan_time in channel_refreshes.values():
+        existing = list(sheetChannel.get_all_values()[row_number - 1])
+        while len(existing) < 6:
+            existing.append("")
+        existing[4] = datetime.dateTime2String(publish_date)
+        existing[5] = scan_time
+        sheetChannel.update(
+            f"A{row_number}:F{row_number}",
+            [existing[:6]],
+            value_input_option="USER_ENTERED",
+        )
     if video_values:
         sheetVideo.insert_rows(video_values, row=2)
 

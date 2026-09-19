@@ -4,7 +4,7 @@
 
 ## 実行構成
 
-通常運用は、Windows PC `3700x` のタスクスケジューラで実行します。現在の登録スクリプトは、監視ステージを分けて起動するため、処理の重複と不要なAPIアクセスを抑えます。
+通常運用は、Windows PC `3700x` のタスクスケジューラで実行します。収集タスクとDiscord送信タスクの2つだけを登録します。
 
 | 実行環境 | 役割 | 備考 |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 1. 各ステージがYouTube、WorryChefs、またはDiscordチャンネルを走査する。
 2. 検出結果をGoogle Sheetsへ保存し、投稿対象をDiscordキューへ登録する。
-3. `monitor_runner.py` がステージ終了後にSQLiteキューを送信する。
+3. `discord_queue.py` の専用タスクが1分ごとにSQLiteキューを送信する。ステージ終了後の送信は補助的に実行する。
 4. Discordの送信先は `discord_channels.json` の通常運用設定に従う。
 
 同一処理の重複起動はロックで抑止し、Discord投稿は送信先ごとの順序、重複排除、429・通信失敗時の再試行、添付画像を保持します。
@@ -64,7 +64,8 @@ python monitor_runner.py --stages youtube-channel
 
 ## 安全策
 
-- ステージごとのロックと全体ロックで同時実行を抑止する。
+- 収集タスクの全体ロックとDiscord送信キューのロックで同時実行を抑止する。
+- 登録チャンネルは最新動画投稿日から `maintenance.inactive_days` 日を超えると通常走査を省略し、YouTube検索で見つかった動画から最新投稿日を更新する。
 - Sheetsへの記録とURLの重複排除により、同じ検出結果の再投稿を抑止する。
 - Discordの通常運用投稿と試験投稿では送信先を分離できる。
 - 実行状態は `XDG_STATE_HOME` 配下、未設定時は `~/.local/state/priconner-tl-scanner` に保存する。
