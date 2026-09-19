@@ -1,8 +1,7 @@
-"""Run the monitor only during the eight days before each month's last day."""
+"""Run the monitor only from the 22nd through the 30th of each month."""
 
 import argparse
-from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date
 
 import monitor_runner
 
@@ -10,18 +9,9 @@ import monitor_runner
 STAGE_CHOICES = tuple(monitor_runner.STAGE_SCRIPTS)
 
 
-def last_day_of_month(day):
-    return date(day.year, day.month, monthrange(day.year, day.month)[1])
-
-
 def is_monitor_day(day):
-    """Return whether *day* is one of the eight days before month end.
-
-    The final calendar day is deliberately excluded.  For example, this
-    yields 20-27 in a common February and 21-28 in a leap-year February.
-    """
-    last_day = last_day_of_month(day)
-    return last_day - timedelta(days=8) <= day < last_day
+    """Return whether *day* is in the fixed 22nd-30th monitoring window."""
+    return 22 <= day.day <= 30
 
 
 def main(argv=None, today=None):
