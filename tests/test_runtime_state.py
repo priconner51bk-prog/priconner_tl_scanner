@@ -112,10 +112,18 @@ def test_scheduled_monitor_main_delegates_when_in_window():
     monitor_runner.main.assert_called_once()
 
 
+def test_scheduled_monitor_main_can_select_one_stage():
+    with patch.object(scheduled_monitor, "monitor_runner") as monitor_runner:
+        result = scheduled_monitor.main(
+            ["--date", "2026-10-25", "--stage", "youtube-search"]
+        )
+    assert result == monitor_runner.main.return_value
+    monitor_runner.main.assert_called_once_with(["--stages", "youtube-search"])
+
+
 def test_scheduled_monitor_main_skips_when_outside_window():
     with patch.object(scheduled_monitor, "monitor_runner") as monitor_runner:
         result = scheduled_monitor.main(["--date", "2026-10-20"])
     assert result == 0
     monitor_runner.main.assert_not_called()
-
 

@@ -7,6 +7,9 @@ from datetime import date, timedelta
 import monitor_runner
 
 
+STAGE_CHOICES = tuple(monitor_runner.STAGE_SCRIPTS)
+
+
 def last_day_of_month(day):
     return date(day.year, day.month, monthrange(day.year, day.month)[1])
 
@@ -27,6 +30,11 @@ def main(argv=None, today=None):
         "--date",
         help="Use YYYY-MM-DD instead of today's local date (mainly for checks).",
     )
+    parser.add_argument(
+        "--stage",
+        choices=STAGE_CHOICES,
+        help="Run only one monitor stage; useful for staggered local schedules.",
+    )
     args = parser.parse_args(argv)
     if args.date:
         try:
@@ -38,8 +46,9 @@ def main(argv=None, today=None):
     if not is_monitor_day(today):
         print(f"Skipping monitor on {today.isoformat()} (outside scheduled period).")
         return 0
-    # Do not let the wrapper-only --date argument leak into monitor_runner.
-    return monitor_runner.main([])
+    # Do not let wrapper-only arguments leak into monitor_runner.
+    runner_args = ["--stages", args.stage] if args.stage else []
+    return monitor_runner.main(runner_args)
 
 
 if __name__ == "__main__":
