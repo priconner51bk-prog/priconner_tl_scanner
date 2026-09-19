@@ -1,0 +1,29 @@
+{
+  "guilds": {
+    "production": {
+      "guild_id": "1336583188385890386",
+      "channels": {
+        "boss0_tl": "1550619283183116351",
+        "boss1_tl": "1550619146637680740",
+        "boss2_tl": "1550619162802524170",
+        "boss3_tl": "1550619177281265777",
+        "boss4_tl": "1550619191722119219",
+        "boss5_tl": "1550619206905761882"
+      }
+    },
+    "experimental": {
+      "guild_id": "1360448049272328333",
+      "channels": {
+        "boss0_tl": "1548887801418752092",
+        "boss1_tl": "1548224803465592872",
+        "boss2_tl": "1548224865138376765",
+        "boss3_tl": "1548224881475195024",
+        "boss4_tl": "1548224897141182537",
+        "boss5_tl": "1548224923191877694"
+      }
+    }
+  },
+  "default_guild_key": "production",
+  "scheduled_guild_keys": ["production"],
+  "test_guild_key": "experimental"
+}
