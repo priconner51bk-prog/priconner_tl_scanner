@@ -28,7 +28,7 @@ Get-ScheduledTask -TaskPath '\' |
 
 ## 2. 監視期間
 
-Windowsタスクスケジューラーは毎月20日〜30日に起動し、`scheduler_bootstrap.ps1` が当日分のステージタスクを登録します。22日〜30日は周期実行、20〜21日は1日1回です。`scheduled_monitor.py` は日付判定の安全弁として残します。
+Windowsタスクスケジューラーは毎月20日〜30日に起動し、`scheduler_bootstrap.ps1` が当日分のステージタスクを登録します。22日〜30日は周期実行、20〜21日は1日1回です。登録されたタスクは`monitor_runner.py --stages ...`を直接起動します。
 
 | 月の日数 | 実行対象日 |
 | ---: | --- |
@@ -42,8 +42,7 @@ Windowsタスクスケジューラーは毎月20日〜30日に起動し、`sched
 確認例:
 
 ```sh
-python scheduled_monitor.py --date 2026-09-19 --stage youtube-search
-python scheduled_monitor.py --date 2026-09-23 --stage youtube-search
+python monitor_runner.py --stages youtube-search
 ```
 
 2つ目は対象期間内のため、実際に外部サービスへ接続します。確認目的では日付だけのスキップ例を使用してください。
@@ -107,6 +106,6 @@ python monitor_runner.py --stages youtube-search
 python monitor_runner.py --stages youtube-channel,worrychefs
 ```
 
-`monitor_runner.py` の直接実行は日付判定を行いません。通常の定期実行では、タスクが呼び出す `scheduled_monitor.py` を使用してください。
+`monitor_runner.py` はタスクスケジューラーからステージ単位で直接起動されます。
 
 投稿せずに確認する場合は、`PRICONNER_NO_POST=1` などの試験用環境変数を確認してから実行します。試験フラグの組み合わせによってはSheetsへの書き込みや外部APIアクセスが発生するため、テスト用設定を分離してください。

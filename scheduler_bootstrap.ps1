@@ -6,7 +6,7 @@ if (-not $pythonCommand) {
     $pythonCommand = Get-Command python -ErrorAction Stop
 }
 $python = $pythonCommand.Source
-$runner = Join-Path $repo "scheduled_monitor.py"
+$runner = Join-Path $repo "monitor_runner.py"
 $taskPrefix = "PriconnerTlScanner-"
 $today = Get-Date
 $dateKey = $today.ToString("yyyyMMdd")
@@ -34,7 +34,7 @@ foreach ($definition in $definitions) {
 
     $action = New-ScheduledTaskAction `
         -Execute $python `
-        -Argument "`"$runner`" --stage $($definition.Stage)" `
+        -Argument "`"$runner`" --stages $($definition.Stage)" `
         -WorkingDirectory $repo
 
     if ($today.Day -ge 22) {

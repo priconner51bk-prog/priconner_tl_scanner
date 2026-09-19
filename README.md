@@ -45,10 +45,10 @@ python monitor_runner.py
 個別ステージを、月末監視期間の判定付きで実行する場合:
 
 ```sh
-python scheduled_monitor.py --stage youtube-search
-python scheduled_monitor.py --stage discord-channel
-python scheduled_monitor.py --stage worrychefs
-python scheduled_monitor.py --stage youtube-channel
+python monitor_runner.py --stages youtube-search
+python monitor_runner.py --stages discord-channel
+python monitor_runner.py --stages worrychefs
+python monitor_runner.py --stages youtube-channel
 ```
 
 監視期間を無視して全ステージを試験する場合は、外部サービスへアクセスして投稿する可能性があるため、実行前に対象を確認してください。
@@ -72,7 +72,7 @@ python scheduled_monitor.py --stage youtube-channel
 ## 関連ファイル
 
 - `monitor_runner.py`: ステージ実行とDiscordキュー送信
-- `scheduled_monitor.py`: 月末監視期間の判定と個別ステージ起動
+- `scheduler_bootstrap.ps1`: 当日分のWindowsタスク登録
 - `register_monitor_tasks.ps1`: 3700xのタスクスケジューラ登録
 - `discord_queue.py`: Discord投稿キューの送信・再試行
 - `OPERATIONS.md`: 運用手順とトラブルシュート
