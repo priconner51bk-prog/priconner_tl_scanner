@@ -8,38 +8,22 @@ if (-not $pythonCommand) {
 $python = $pythonCommand.Source
 $bootstrap = Join-Path $repo "scheduler_bootstrap.ps1"
 $taskPrefix = "PriconnerTlScanner-"
-$principal = New-ScheduledTaskPrincipal `
-    -UserId "$env:USERDOMAIN\$env:USERNAME" `
-    -LogonType Interactive `
-    -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
-    -MultipleInstances IgnoreNew
-
 $taskName = "$taskPrefix-Bootstrap"
-    $action = New-ScheduledTaskAction `
-        -Execute "powershell.exe" `
-        -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$bootstrap`"" `
-        -WorkingDirectory $repo
-    $trigger = New-ScheduledTaskTrigger `
-        -Monthly `
-        -DaysOfMonth (20..30) `
-        -At "12:00"
+$oldTaskNames = @("YouTubeSearch", "DiscordChannel", "WorryChefs", "YouTubeChannel")
+foreach ($oldTaskName in $oldTaskNames) {
+    schtasks.exe /Delete /TN "$taskPrefix$oldTaskName" /F 2>$null | Out-Null
+}
+schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
 
-    Unregister-ScheduledTask `
-        -TaskName $taskName `
-        -TaskPath "\" `
-        -Confirm:$false `
-        -ErrorAction SilentlyContinue
-    Register-ScheduledTask `
-        -TaskName $taskName `
-        -TaskPath "\" `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Principal $principal `
-        -Description "Register the daily monitoring tasks for the current day." `
-        -Force | Out-Null
+$taskCommand = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$bootstrap`""
+schtasks.exe /Create `
+    /TN $taskName `
+    /TR $taskCommand `
+    /SC MONTHLY `
+    /D 20-30 `
+    /ST 12:00 `
+    /RU "$env:USERDOMAIN\$env:USERNAME" `
+    /RL LIMITED `
+    /F | Out-Null
 
 Write-Host "Registered the Priconner TL scanner bootstrap task for $env:USERDOMAIN\$env:USERNAME"
