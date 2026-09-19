@@ -11,7 +11,7 @@ $taskPrefix = "PriconnerTlScanner-"
 $taskName = "$taskPrefix-Bootstrap"
 $oldTaskNames = @("YouTubeSearch", "DiscordChannel", "WorryChefs", "YouTubeChannel")
 foreach ($oldTaskName in $oldTaskNames) {
-    schtasks.exe /Delete /TN "$taskPrefix$oldTaskName" /F 2>$null | Out-Null
+    Unregister-ScheduledTask -TaskName "$taskPrefix$oldTaskName" -TaskPath "\" -Confirm:$false -ErrorAction SilentlyContinue
 }
 $taskCommand = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$bootstrap`""
 schtasks.exe /Create `
