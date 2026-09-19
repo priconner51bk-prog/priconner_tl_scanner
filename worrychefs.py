@@ -270,36 +270,11 @@ def formation_image_urls(html, code=None):
     best_labels = best_labels[:5]
     # Keep the source image alt text for 404 placeholders.  This is the
     # original sheet name, before character-name translation.
-    # Resolve labels from the row immediately preceding the portrait row.
-    # Google Sheets publishes portrait cells with rowspan, so grid-relative
-    # neighbours can point at stats or notes instead of formation names.
-    source_rows = soup.find_all("tr")
-    resolved_labels = []
-    for src, fallback in zip(result, best_labels):
-        label = fallback
-        image_tag = soup.find("img", src=src)
-        image_row = image_tag.find_parent("tr") if image_tag else None
-        if image_row in source_rows:
-            row_index = source_rows.index(image_row)
-            row_images = [img.get("src") for img in image_row.find_all("img")]
-            image_index = row_images.index(src) - max(0, len(row_images) - 5)
-            for prior in reversed(source_rows[max(start_row, row_index - 4):row_index]):
-                values = [c.get_text(" ", strip=True) for c in prior.find_all(["td", "th"], recursive=False)]
-                time_index = next(
-                    (i for i, value in enumerate(values)
-                     if re.fullmatch(r"\d{1,3}:\d{2}", value)),
-                    None,
-                )
-                before_time = values[:time_index] if time_index is not None else values
-                names = [v for v in before_time
-                         if v and not re.fullmatch(
-                             r"(?:\d[\d-]*|\d{1,3}:\d{2}|MAX(?:/\d+)?|UE|CR)",
-                             v, re.IGNORECASE)]
-                if len(names) >= 5:
-                    label = names[max(0, min(image_index, len(names) - 1))]
-                    break
-        resolved_labels.append(label)
-    _formation_labels_cache[tuple(result)] = resolved_labels
+    # The grid mapping above is the authoritative source for the label of
+    # each image.  Do not infer names from preceding rows: rowspan/colspan
+    # layouts can make those rows belong to another formation or to the TL
+    # metadata, causing the same name to be rendered for several portraits.
+    _formation_labels_cache[tuple(result)] = best_labels
     return result
 
 
