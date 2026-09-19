@@ -3,7 +3,6 @@
 import json
 import os
 import tempfile
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -102,5 +101,4 @@ def test_monitor_runner_main_returns_two_for_unknown_stage():
             ["--runtime-dir", directory, "--stages", "bogus"]
         )
     assert result == 2
-
 

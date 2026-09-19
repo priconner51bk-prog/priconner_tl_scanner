@@ -1,10 +1,10 @@
 """Read-only comparison of published simple TLs and Discord WorryChefs posts."""
 
 import re
+
 import requests
 
 import discord_utils
-import public_sheet_export
 import worrychefs
 
 
@@ -32,7 +32,6 @@ def _messages(channel):
 def main():
     sources = worrychefs.load_worrychefs_sources()
     simple = next(source for source in sources if source["name"] == "simple")
-    rows = public_sheet_export.fetch_public_sheet(simple["spreadsheet_id"], simple["gid"])
     records = [record for record in worrychefs.collect_worrychefs_records([simple])
                if record.get("code")]
     expected = {

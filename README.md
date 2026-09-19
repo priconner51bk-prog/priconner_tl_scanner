@@ -42,7 +42,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 python monitor_runner.py
 ```
 
-個別ステージを、月末監視期間の判定付きで実行する場合:
+個別ステージを実行する場合:
 
 ```sh
 python monitor_runner.py --stages youtube-search

@@ -2,14 +2,12 @@
 
 ## 1. 3700xの定期実行
 
-`register_monitor_tasks.ps1` は、現在のユーザーで次の4タスクを登録します。
+`register_monitor_tasks.ps1` は、現在のユーザーで毎月20〜30日に起動するブートストラップタスクを登録します。Windowsの仕様上、日付ごとに11個の起動タスクを作成します。ブートストラップが当日分のステージタスクを4個登録します。
 
 | タスク | ステージ | 間隔 | 開始時刻 |
 | --- | --- | ---: | ---: |
-| `PriconnerTlScanner-YouTubeSearch` | `youtube-search` | 5分 | 12:00 |
-| `PriconnerTlScanner-DiscordChannel` | `discord-channel` | 5分 | 12:01 |
-| `PriconnerTlScanner-WorryChefs` | `worrychefs` | 10分 | 12:02 |
-| `PriconnerTlScanner-YouTubeChannel` | `youtube-channel` | 30分 | 12:03 |
+| `PriconnerTlScanner--Bootstrap-20`〜`30` | 当日タスク登録 | 月1回 | 12:00 |
+| `PriconnerTlScanner-<Stage>-YYYYMMDD` | 各収集ステージ | 5〜30分 | 12:00〜12:03 |
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -30,22 +28,13 @@ Get-ScheduledTask -TaskPath '\' |
 
 Windowsタスクスケジューラーは毎月20日〜30日に起動し、`scheduler_bootstrap.ps1` が当日分のステージタスクを登録します。22日〜30日は周期実行、20〜21日は1日1回です。登録されたタスクは`monitor_runner.py --stages ...`を直接起動します。
 
-| 月の日数 | 実行対象日 |
-| ---: | --- |
-| 31日 | 23〜30日 |
-| 30日 | 22〜29日 |
-| 通常年の2月 | 20〜27日 |
-| うるう年の2月 | 21〜28日 |
-
-正確な判定は `last_day - 8 <= today < last_day` です。期間外のタスク起動は終了コード0でスキップし、外部サービスへ接続しません。
+実在する日付だけが起動するため、2月は通常年が20〜28日、うるう年が20〜29日です。期間外のタスクは登録されません。
 
 確認例:
 
 ```sh
 python monitor_runner.py --stages youtube-search
 ```
-
-2つ目は対象期間内のため、実際に外部サービスへ接続します。確認目的では日付だけのスキップ例を使用してください。
 
 ## 3. Discord投稿
 
