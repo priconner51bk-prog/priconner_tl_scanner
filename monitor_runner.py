@@ -77,6 +77,7 @@ def run_stages(
     python_executable=sys.executable,
     root_dir=ROOT_DIR,
     clock=None,
+    queue_path=None,
 ):
     runtime_dir = Path(runtime_dir).expanduser().resolve()
     store = StateStore(runtime_dir / "state.json", clock=clock)
@@ -112,7 +113,7 @@ def run_stages(
             )
             return exit_code
 
-    queue_path = runtime_dir / "discord_queue.sqlite3"
+    queue_path = Path(queue_path) if queue_path is not None else runtime_dir / "discord_queue.sqlite3"
     try:
         queue_result = discord_queue.drain(path=queue_path)
     except Exception as error:  # noqa: BLE001 - keep queue failures in monitor state
@@ -172,8 +173,13 @@ def main(argv=None):
         )
     try:
         stages = parse_stages(stages_value)
-        with acquire_lock(runtime_dir / "monitor_runner.lock"):
-            return run_stages(stages, runtime_dir)
+        common_runtime_dir = runtime_dir.resolve()
+        state_runtime_dir = common_runtime_dir
+        if len(stages) == 1:
+            state_runtime_dir = common_runtime_dir / stages[0]
+        queue_path = common_runtime_dir / "discord_queue.sqlite3"
+        with acquire_lock(state_runtime_dir / "monitor_runner.lock"):
+            return run_stages(stages, state_runtime_dir, queue_path=queue_path)
     except LockBusy:
         print("Another monitor run is already in progress; skipping.")
         return 0
