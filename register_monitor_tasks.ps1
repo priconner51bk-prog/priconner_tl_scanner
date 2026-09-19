@@ -13,8 +13,6 @@ $oldTaskNames = @("YouTubeSearch", "DiscordChannel", "WorryChefs", "YouTubeChann
 foreach ($oldTaskName in $oldTaskNames) {
     schtasks.exe /Delete /TN "$taskPrefix$oldTaskName" /F 2>$null | Out-Null
 }
-schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
-
 $taskCommand = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$bootstrap`""
 schtasks.exe /Create `
     /TN $taskName `
