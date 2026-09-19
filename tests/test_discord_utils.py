@@ -1,5 +1,7 @@
 ﻿"""Tests for the Discord webhook notification helpers."""
 
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import requests
@@ -11,12 +13,23 @@ def _fake_response(status_code=200):
     class FakeResponse:
         def __init__(self, status_code):
             self.status_code = status_code
+            self.text = ""
 
         def raise_for_status(self):
             if self.status_code >= 400:
                 raise requests.HTTPError("status")
 
     return FakeResponse(status_code)
+
+
+def test_forced_posts_route_default_guild_to_configured_test_guild():
+    config = {
+        "default_guild_key": "production",
+        "test_guild_key": "experimental",
+        "guilds": {"production": {}, "experimental": {}},
+    }
+    with patch.dict("os.environ", {"PRICONNER_FORCE_POST": "1"}, clear=False):
+        assert discord_utils._resolve_guild_key(config, "default") == "experimental"
 
 
 def test_post_succeeds_on_first_try():
@@ -88,6 +101,34 @@ def test_bot_token_required():
             pass
         else:
             raise AssertionError("expected RuntimeError")
+
+
+def test_bot_token_explicitly_loads_local_env_before_reading_process_env():
+    with patch.object(
+        discord_utils.gspread_utils,
+        "get_config_value",
+        side_effect=lambda section, key, fallback=None: fallback,
+    ), patch.object(
+        discord_utils.gspread_utils,
+        "load_local_env",
+    ) as load_env, patch.dict(
+        "os.environ", {"DISCORD_BOT_TOKEN": "env-token"}, clear=False
+    ):
+        assert discord_utils._bot_token() == "env-token"
+    load_env.assert_called_once_with()
+
+
+def test_load_local_env_does_not_override_existing_environment():
+    with tempfile.TemporaryDirectory() as directory:
+        env_path = Path(directory) / ".env"
+        env_path.write_text(
+            "DISCORD_BOT_TOKEN=dotenv-token\nOTHER_VALUE=loaded\n",
+            encoding="utf-8",
+        )
+        with patch.dict("os.environ", {"DISCORD_BOT_TOKEN": "process-token"}, clear=False):
+            discord_utils.gspread_utils.load_local_env(env_path)
+            assert discord_utils.os.environ["DISCORD_BOT_TOKEN"] == "process-token"
+            assert discord_utils.os.environ["OTHER_VALUE"] == "loaded"
 
 
 def test_integer_config_clamps_minimum():

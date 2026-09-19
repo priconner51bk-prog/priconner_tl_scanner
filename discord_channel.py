@@ -495,21 +495,22 @@ def checkNewArrivalsForDiscordChannel(
                     f"検出日時: {scan_time}"
                 )
                 if is_youtube:
+                    display_source_url = post_tracker.suppress_discord_embeds(source_url)
                     source_link = (
-                        f"\n投稿元リンク: {discord_post_url}"
+                        f"\n投稿元リンク: {post_tracker.suppress_discord_embeds(discord_post_url)}"
                         if discord_post_url else ""
                     )
                     body = (
                         f"{metadata}\n"
                         f"動画タイトル: {title}\n"
-                        f"動画URL: {source_url}\n"
+                        f"動画URL: {display_source_url}\n"
                         f"{post_tracker.markdown_note_line('Discordメッセージから検出')}\n"
                         f"{source_link}"
                     )
                     if formatted_tl:
                         formatted_body = post_tracker.add_post_separator(
                             f"{body}\n\nTL（整形済み）:\n```scm\n"
-                            f"{formatted_tl}\n```"
+                            f"{post_tracker.suppress_discord_embeds(formatted_tl)}\n```"
                         )
                         if len(formatted_body) <= 1950:
                             body = formatted_body

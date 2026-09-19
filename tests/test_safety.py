@@ -87,6 +87,10 @@ class SafetyTests(unittest.TestCase):
             channel = youtube_channel.YTDLPChannel("https://example.test/channel")
 
         self.assertTrue(captured["ignoreerrors"])
+        self.assertEqual(captured["socket_timeout"], youtube_channel.YOUTUBE_SOCKET_TIMEOUT)
+        self.assertEqual(captured["retries"], youtube_channel.YOUTUBE_RETRIES)
+        self.assertEqual(captured["fragment_retries"], youtube_channel.YOUTUBE_RETRIES)
+        self.assertEqual(captured["extractor_retries"], youtube_channel.YOUTUBE_RETRIES)
         self.assertEqual(channel.videos, [])
         self.assertEqual(captured["playliststart"], 1)
         self.assertEqual(captured["playlistend"], youtube_channel.DEFAULT_CHANNEL_LIMIT)
@@ -111,7 +115,7 @@ class SafetyTests(unittest.TestCase):
         with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
             youtube_channel.YTDLPChannel("https://example.test/channel", playlist_start=21)
 
-        self.assertTrue(captured["extract_flat"])
+        self.assertFalse(captured["extract_flat"])
         self.assertEqual(captured["playlist_items"], "21-40")
         self.assertEqual(captured["playliststart"], 21)
         self.assertEqual(captured["playlistend"], 40)
@@ -143,7 +147,7 @@ class SafetyTests(unittest.TestCase):
             youtube_channel.YTDLPChannel("https://example.test/channel/")
 
         self.assertEqual(captured["url"], "https://example.test/channel/videos")
-        self.assertTrue(captured["extract_flat"])
+        self.assertFalse(captured["extract_flat"])
 
     def test_registered_channel_accepts_video_without_relevance_terms(self):
         class FakeSheet:
@@ -209,6 +213,12 @@ class SafetyTests(unittest.TestCase):
 
         self.assertEqual(len(video_sheet.inserted), 1)
         self.assertEqual(video_sheet.inserted[0][4], video.watch_url)
+
+    def test_channel_scan_is_skipped_for_isolated_boss_worker(self):
+        with patch.dict("os.environ", {"PRICONNER_YOUTUBE_BOSS_INDEX": "3"}, clear=False), \
+                patch.object(youtube_channel.gspread, "getNewArrivalsSheet") as get_sheet:
+            youtube_channel.checkNewArrivalsForYouTube()
+        get_sheet.assert_not_called()
 
     def test_registered_channel_normalizes_naive_publish_datetime(self):
         class FakeSheet:
@@ -526,8 +536,8 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(sheet.written, [["https://www.youtube.com/watch?v=new1"]])
         self.assertEqual(len(posted), 1)
         self.assertIn("動画タイトル: title", posted[0])
-        self.assertIn("備考: Discordメッセージから検出", posted[0])
-        self.assertIn("動画URL: https://www.youtube.com/watch?v=new1", posted[0])
+        self.assertIn("**備考:** Discordメッセージから検出", posted[0])
+        self.assertIn("動画URL: <https://www.youtube.com/watch?v=new1>", posted[0])
         self.assertEqual(notified, ["Discord新着1件"])
 
     def test_token_fetch_saves_token_into_config(self):

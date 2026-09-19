@@ -10,6 +10,35 @@ WAIT_TIME = 2
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.ini"
 
+
+def load_local_env(env_path=None):
+    """Load simple KEY=VALUE entries from a local, ignored .env file.
+
+    Existing process environment variables always win.  The optional path is
+    useful for callers that initialize a worker after module import and for
+    tests without exposing secret values.
+    """
+    env_path = Path(env_path) if env_path else BASE_DIR / ".env"
+    if not env_path.exists():
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip().strip("\"'")
+        if name and name not in os.environ:
+            os.environ[name] = value
+
+
+_load_local_env = load_local_env
+load_local_env()
+
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive",

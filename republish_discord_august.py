@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 import gspread_utils as gspread
 import discord_utils as discord
+from post_change_tracker import suppress_discord_embeds
 from tl_formatting import format_discord_tl
 
 SOURCE_GUILD_ID = "883641935175233646"
@@ -149,11 +150,11 @@ def build_post(record: dict) -> dict:
     # Some scan rows already contain the generated `動画URL:` metadata in
     # their original body.  Do not append the same URL a second time.
     if youtube_url and youtube_url not in raw:
-        footer += f"\n動画URL: {youtube_url}"
+        footer += f"\n動画URL: {suppress_discord_embeds(youtube_url)}"
     elif "投稿内URL:" in record["body"]:
         embedded = [url for url in _urls(record["body"]) if url != record["source_url"]]
         if embedded:
-            footer += f"\n投稿内URL: {embedded[0]}"
+            footer += f"\n投稿内URL: {suppress_discord_embeds(embedded[0])}"
     if formatted:
         original_prefix, original_suffix = _md_block("TL（原文）", raw or "（原文なし）")
         formatted_prefix, formatted_suffix = _md_block("TL（整形済み）", formatted)

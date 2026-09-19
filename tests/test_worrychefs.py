@@ -150,3 +150,76 @@ def test_prepare_sheet_changes_preserves_first_seen_for_updates():
     assert header[0] == "TLキー"
     assert inserts == []
     assert updates == [(2, ["simple:D101", "new", "h2", "first", "now", "simple", "u", "old"])]
+
+
+def test_record_matches_month_treats_target_as_trial_snapshot_label():
+    record = {"key": "simple:D401"}
+    rows = [["TLキー", "TL本文", "TLハッシュ", "新規検出日時"],
+            ["simple:D401", "text", "hash", "2026/08/31 12:00:00"]]
+    assert worrychefs.record_matches_month(record, rows, "2026/08") is True
+    assert worrychefs.record_matches_month(record, rows, "2026/09") is True
+
+
+def test_apply_alternating_post_modes_marks_new_and_diff_update():
+    records = [
+        {"key": "simple:D401", "text": "new body"},
+        {"key": "simple:D402", "text": "current body"},
+    ]
+    rows = [
+        ["TLキー", "TL本文", "TLハッシュ"],
+        ["simple:D401", "old body", "h1"],
+        ["simple:D402", "old body", "h2"],
+    ]
+    assert worrychefs.apply_alternating_post_modes(records, rows) == {
+        "new": 1,
+        "updated": 1,
+    }
+    assert records[0]["status"] == "new"
+    assert records[0]["force_full"] is True
+    assert records[1]["status"] == "updated"
+    assert records[1]["force_full"] is False
+    assert records[1]["previous_text"] == "old body"
+    assert worrychefs.post_tracker.post_content(records[1]) == (
+        "【差分】\n- old body\n+ current body\n\n"
+        "【現行本文】\ncurrent body"
+    )
+
+
+def test_build_worrychefs_split_messages_does_not_use_attachments():
+    record = {
+        "code": "D443",
+        "source": "manual-d4",
+        "url": "https://example.test/source",
+        "status": "updated",
+    }
+    messages = worrychefs.build_worrychefs_split_messages(
+        record, "【差分】\n- old\n+ new\n\n【現行本文】\n" + "x" * 2200, "now", limit=500
+    )
+    assert len(messages) > 1
+    assert all("添付" not in message for message in messages)
+    assert all(len(message) <= 500 for message in messages)
+
+
+def test_build_formation_attachment_uses_png_not_markdown(monkeypatch):
+    record = {
+        "code": "D443",
+        "source": "manual-d4",
+        "url": "https://example.test/source",
+        "image_urls": [
+            "https://images.example.test/one.png",
+            "https://images.example.test/two.png",
+            "https://images.example.test/three.png",
+            "https://images.example.test/four.png",
+            "https://images.example.test/five.png",
+        ],
+    }
+    class FakeImage:
+        def getvalue(self):
+            return b"png-bytes"
+
+    monkeypatch.setattr(worrychefs, "combined_formation_image", lambda urls: FakeImage())
+    assert worrychefs.build_formation_attachment(record) == (
+        "formation.png",
+        b"png-bytes",
+        "image/png",
+    )
