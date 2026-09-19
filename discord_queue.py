@@ -16,6 +16,8 @@ QUEUE_LOCK_NAME = "discord_post_queue.lock"
 DEFAULT_MAX_ATTEMPTS = 5
 DEFAULT_BATCH_SIZE = 100
 RETRY_BASE_SECONDS = 30
+SENT_RETENTION_DAYS = 180
+FAILED_RETENTION_DAYS = 365
 
 
 def queue_path(path=None):
@@ -162,6 +164,34 @@ def _reset_stale_sending(connection, now):
     )
 
 
+def _cleanup_history(
+    connection,
+    now,
+    sent_retention_days=SENT_RETENTION_DAYS,
+    failed_retention_days=FAILED_RETENTION_DAYS,
+):
+    sent_cutoff = now - (sent_retention_days * 86400)
+    failed_cutoff = now - (failed_retention_days * 86400)
+    sent_deleted = connection.execute(
+        """
+        DELETE FROM discord_queue
+        WHERE status = 'sent'
+          AND sent_at IS NOT NULL
+          AND sent_at < ?
+        """,
+        (sent_cutoff,),
+    ).rowcount
+    failed_deleted = connection.execute(
+        """
+        DELETE FROM discord_queue
+        WHERE status = 'failed'
+          AND created_at < ?
+        """,
+        (failed_cutoff,),
+    ).rowcount
+    return sent_deleted, failed_deleted
+
+
 def _next_ready(connection, now):
     return connection.execute(
         """
@@ -216,12 +246,24 @@ def _send(item):
 def drain(path=None, max_items=DEFAULT_BATCH_SIZE, max_attempts=DEFAULT_MAX_ATTEMPTS):
     """Send queued items in destination order under one process lock."""
     path = queue_path(path)
-    result = {"sent": 0, "retried": 0, "failed": 0, "remaining": 0, "locked": False}
+    result = {
+        "sent": 0,
+        "retried": 0,
+        "failed": 0,
+        "remaining": 0,
+        "cleaned_sent": 0,
+        "cleaned_failed": 0,
+        "locked": False,
+    }
     try:
         with acquire_lock(path.with_name(QUEUE_LOCK_NAME)), closing(
             _connect(path)
         ) as connection:
                 now = time.time()
+                (
+                    result["cleaned_sent"],
+                    result["cleaned_failed"],
+                ) = _cleanup_history(connection, now)
                 _reset_stale_sending(connection, now)
                 connection.commit()
 
@@ -284,5 +326,6 @@ if __name__ == "__main__":
     print(
         "Discordキュー: "
         f"送信{summary['sent']}件 再試行待ち{summary['retried']}件 "
-        f"失敗{summary['failed']}件 残り{summary['remaining']}件"
+        f"失敗{summary['failed']}件 残り{summary['remaining']}件 "
+        f"履歴整理{summary['cleaned_sent'] + summary['cleaned_failed']}件"
     )
