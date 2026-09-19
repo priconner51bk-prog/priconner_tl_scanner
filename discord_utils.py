@@ -68,6 +68,10 @@ def _resolve_guild_key(config, guild_key):
     if guild_key != "default":
         return guild_key
     guilds = config.get("guilds", {})
+    if _is_test_post():
+        test_guild = config.get("test_guild_key")
+        if test_guild in guilds:
+            return test_guild
     configured_default = config.get("default_guild_key")
     if configured_default in guilds:
         return configured_default
@@ -177,38 +181,30 @@ def post(text, guild_key="default", channel_key="boss0_tl", files=None):
     return _send(text, "ポスト送信成功", guild_key, channel_key, files)
 
 
-def post_to_configured_guilds(text, channel_key="boss0_tl", files=None):
-    responses = []
-    failures = []
-    for guild_key in configured_guild_keys():
-        try:
-            responses.append(
-                post(text, guild_key=guild_key, channel_key=channel_key, files=files)
-            )
-        except Exception as error:
-            failures.append((guild_key, error))
-    if failures:
-        raise RuntimeError(
-            "Discord投稿に失敗: " + ", ".join(key for key, _ in failures)
-        ) from failures[0][1]
-    return responses[-1] if responses else None
+def post_to_configured_guilds(
+    text, channel_key="boss0_tl", files=None, guild_keys=None
+):
+    from discord_queue import enqueue_for_guilds
+
+    return enqueue_for_guilds(
+        text,
+        channel_key=channel_key,
+        guild_keys=guild_keys if guild_keys is not None else configured_guild_keys(),
+        kind="post",
+        files=files,
+    )
 
 
-def notify_to_configured_guilds(text, channel_key="boss0_tl"):
-    responses = []
-    failures = []
-    for guild_key in configured_guild_keys():
-        try:
-            responses.append(
-                notify(text, guild_key=guild_key, channel_key=channel_key)
-            )
-        except Exception as error:
-            failures.append((guild_key, error))
-    if failures:
-        raise RuntimeError(
-            "Discord通知に失敗: " + ", ".join(key for key, _ in failures)
-        ) from failures[0][1]
-    return responses[-1] if responses else None
+def notify_to_configured_guilds(text, channel_key="boss0_tl", guild_keys=None):
+    from discord_queue import enqueue_for_guilds
+
+    return enqueue_for_guilds(
+        text,
+        channel_key=channel_key,
+        guild_keys=guild_keys if guild_keys is not None else configured_guild_keys(),
+        kind="notify",
+        dedupe_key=None,
+    )
 
 
 def boss_channel_key(code):
@@ -226,8 +222,13 @@ def post_for_boss(code, text, guild_key="default", files=None):
     return post(text, guild_key=guild_key, channel_key=boss_channel_key(code), files=files)
 
 
-def post_for_boss_to_configured_guilds(code, text, files=None):
-    return post_to_configured_guilds(text, channel_key=boss_channel_key(code), files=files)
+def post_for_boss_to_configured_guilds(code, text, files=None, guild_keys=None):
+    return post_to_configured_guilds(
+        text,
+        channel_key=boss_channel_key(code),
+        files=files,
+        guild_keys=guild_keys,
+    )
 
 
 def delete_worrychefs_posts(guild_key="default", channel_keys=None):
@@ -395,7 +396,10 @@ def delete_youtube_posts(guild_key="default", channel_keys=None):
                 content = str(message.get("content", ""))
                 is_full_youtube = (
                     "動画タイトル:" in content
-                    and "動画URL: https://www.youtube.com/watch" in content
+                    and re.search(
+                        r"動画URL:\s*<?https://www\.youtube\.com/watch",
+                        content,
+                    )
                 )
                 is_legacy_title_diff = (
                     "削除: 動画タイトル:" in content

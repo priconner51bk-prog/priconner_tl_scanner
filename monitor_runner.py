@@ -10,6 +10,7 @@ from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path
 
+import discord_queue
 from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -110,6 +111,34 @@ def run_stages(
                 exit_code=exit_code,
             )
             return exit_code
+
+    queue_path = runtime_dir / "discord_queue.sqlite3"
+    try:
+        queue_result = discord_queue.drain(path=queue_path)
+    except Exception as error:  # noqa: BLE001 - keep queue failures in monitor state
+        print(f"Discordキュー送信に失敗: {error}", file=sys.stderr)
+        store.update(
+            status="failed",
+            stage="discord-queue",
+            failure_stage="discord-queue",
+            finished_at=store.clock().isoformat(),
+            exit_code=1,
+        )
+        return 1
+    print(
+        "Discordキュー: "
+        f"送信{queue_result['sent']}件 再試行待ち{queue_result['retried']}件 "
+        f"失敗{queue_result['failed']}件 残り{queue_result['remaining']}件"
+    )
+    if queue_result["failed"]:
+        store.update(
+            status="failed",
+            stage="discord-queue",
+            failure_stage="discord-queue",
+            finished_at=store.clock().isoformat(),
+            exit_code=1,
+        )
+        return 1
 
     store.update(
         status="success",

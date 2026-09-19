@@ -526,12 +526,10 @@ def _split_text_lines(text, limit):
 
 def build_worrychefs_split_messages(record, post_text, detected_at, limit=1950):
     """Build attachment-free messages for TL bodies exceeding Discord's limit."""
-    image_links = formation_image_links(record)
     header = (
         f"[WorryChefs更新] {record['code']} ({record['source']})\n"
         f"更新検知日時: {detected_at if record.get('status') == 'updated' else ''}\n"
         f"参照: {record['url']}\n"
-        f"{image_links}\n" if image_links else ""
         "TL本文（分割）\n"
     )
     payload_limit = max(100, limit - len(header) - 32)
@@ -543,17 +541,15 @@ def build_worrychefs_split_messages(record, post_text, detected_at, limit=1950):
     ]
 
 
-def formation_image_links(record):
-    """Render source portrait URLs so Discord can preview them without files."""
+def build_formation_attachment(record):
+    """Build one PNG attachment from the record's five formation portraits."""
     urls = list(dict.fromkeys(record.get("image_urls") or []))[:5]
-    if not urls:
+    if len(urls) < 5:
         return ""
-    labels = _formation_labels_cache.get(tuple(urls), [])
-    lines = ["編成画像（外部画像URL）"]
-    for index, url in enumerate(urls):
-        label = labels[index].strip() if index < len(labels) else ""
-        lines.append(f"{label}: {url}" if label else url)
-    return "\n".join(lines)
+    image = combined_formation_image(urls)
+    if image is None:
+        return ""
+    return ("formation.png", image.getvalue(), "image/png")
 
 
 def build_worrychefs_content(record, post_text, detected_at, limit=1950):
@@ -574,7 +570,6 @@ def build_worrychefs_content(record, post_text, detected_at, limit=1950):
         f"{rendered_post}"
     )
     formation = f"\n\n```text\n{record['formation_md']}\n```" if record.get("formation_md") else ""
-    formation += f"\n\n{formation_image_links(record)}" if formation_image_links(record) else ""
     candidates = [
         full + formation,
         (
@@ -789,6 +784,12 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
             record["force_full"] = True
         post_text = post_tracker.post_content(record)
         content = build_worrychefs_content(record, post_text, detected_at)
+        formation_attachment = None
+        if record.get("image_urls"):
+            try:
+                formation_attachment = build_formation_attachment(record) or None
+            except Exception as error:
+                print(f"警告: 編成画像の生成に失敗 {record['key']}: {error}")
         if content is None:
             messages = build_worrychefs_split_messages(record, post_text, detected_at)
         else:
@@ -799,11 +800,14 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
                 if record_boss != str(target_boss):
                     print(f"警告: 試験担当外の投稿を抑止: {record['key']}")
                     continue
-            for message in messages:
-                for guild_key in post_guild_keys:
-                    discord.post_for_boss(
-                        record["code"], message, guild_key=guild_key
-                    )
+            for index, message in enumerate(messages):
+                files = {"file": formation_attachment} if formation_attachment and index == 0 else None
+                discord.post_for_boss_to_configured_guilds(
+                    record["code"],
+                    message,
+                    files=files,
+                    guild_keys=post_guild_keys,
+                )
         except Exception as error:
             print(f"失敗: WorryChefs Discord通知 {record['key']}: {error}")
     return records

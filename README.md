@@ -14,6 +14,7 @@
 - Discord通知は `timeout` 秒で打ち切り、`retries` 回まで待機時間を伸ばして再試行します。到着データをSheetsへ保存してからURL登録・通知を行います。
 - 投稿の多重度はボス単位で分離できます。`boss1_tl`〜`boss5_tl` は別チャンネルのため、異なるボスの収集・投稿は多重化して構いません。同一ボスへの投稿は直列化し、API間隔と429の再試行を維持します。
 - `discord_channels.json` は`production`と`experimental`の複数サーバーを登録できます。通常の定期実行は`scheduled_guild_keys`に指定した全サーバーへ投稿し、強制投稿・件数制限・リセットなどの試験系フラグがある実行は`test_guild_key`だけへ投稿します。
+- 収集処理からのDiscord投稿は`discord_queue.py`のSQLiteキューへ登録され、`monitor_runner.py`の最後に単一ディスパッチャーが送信します。キューは送信先ごとの順序、429・通信失敗時の再試行、重複排除、添付画像を保持します。手動で送信する場合は`python3 discord_queue.py`を実行します。
 - Discordチャンネル監視は`[discord_channel]`設定でサーバー・チャンネルを指定します。Discordユーザートークン（Bot登録不要）またはBotトークンでメッセージ本文・埋め込み・添付からYouTubeリンクを検出し、`limit` 件まで新しい順に取得します。既にSheetsへ記録済みのURLは重複排除し、429応答は`Retry-After`を待ってから再試行します。
 - Discordメッセージ本文に時刻・矢印・UBなどのTL行が2行以上ある場合、`priconner_tl_formatter` の `format_text` で自動整形し、URLと整形済みTLをWebhookへ投稿します。TL行がない投稿は従来どおりURLだけを投稿します。
 
