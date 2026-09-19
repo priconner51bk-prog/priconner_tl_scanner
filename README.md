@@ -9,7 +9,6 @@
 | 実行環境 | 役割 | 備考 |
 | --- | --- | --- |
 | 3700x / `www51` | 主系の定期実行 | `register_monitor_tasks.ps1` で登録。ログオン中に実行 |
-| GitHub Actions | 手動実行・予備系 | 定刻実行は遅延・スキップすることがあるため、主系にはしない |
 | 手動実行 | 調査・復旧・試験 | `monitor_runner.py` または個別ステージを直接実行 |
 
 ## 最短セットアップ
@@ -22,7 +21,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\register_monitor_tasks.ps1
 ```
 
-タスクの詳細、GitHub Actions、Discord投稿、障害時の確認方法は [OPERATIONS.md](OPERATIONS.md) を参照してください。
+タスクの詳細、Discord投稿、障害時の確認方法は [OPERATIONS.md](OPERATIONS.md) を参照してください。
 
 秘密情報の名前と保管場所は [SECRET_INVENTORY.local.md](SECRET_INVENTORY.local.md) にまとめています。このファイルと設定ファイルの値は、チャット・ログ・Gitへ出さないでください。
 
@@ -75,7 +74,6 @@ python scheduled_monitor.py --stage youtube-channel
 - `monitor_runner.py`: ステージ実行とDiscordキュー送信
 - `scheduled_monitor.py`: 月末監視期間の判定と個別ステージ起動
 - `register_monitor_tasks.ps1`: 3700xのタスクスケジューラ登録
-- `.github/workflows/monitor.yml`: GitHub Actionsの手動・定期実行
 - `discord_queue.py`: Discord投稿キューの送信・再試行
 - `OPERATIONS.md`: 運用手順とトラブルシュート
 - `SECRET_INVENTORY.local.md`: 秘密情報の対応表

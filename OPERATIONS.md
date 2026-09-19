@@ -64,18 +64,7 @@ python discord_queue.py
 
 これは外部へ投稿する操作です。実行前にキュー内容と送信先を確認してください。
 
-## 4. GitHub Actions
-
-`.github/workflows/monitor.yml` は次の2通りで動きます。
-
-- `workflow_dispatch`: 手動実行。通常投稿、新規投稿、更新投稿、1件制限を選択できる。
-- `schedule`: `17 3 * * *`（UTC、JSTでは12:17）に全ステージを1回実行する。
-
-GitHub Actionsのスケジュールは遅延・スキップすることがあるため、3700xのタスクスケジューラを主系にしています。両方を同時に有効にすると、同じ検出結果を別環境で同時処理する可能性があるため、主系を3700xにする場合はActionsの定期実行を予備扱いにしてください。
-
-Actionsには、[SECRET_INVENTORY.local.md](SECRET_INVENTORY.local.md) に記載したActions用Secretsが必要です。Actionsではローカルの `config.ini` や `.env` は存在しないため、Secretから一時ファイルと環境変数を構成します。
-
-## 5. 状態・失敗確認
+## 4. 状態・失敗確認
 
 既定の状態保存先は次のとおりです。
 
@@ -103,7 +92,7 @@ Get-ScheduledTask -TaskPath '\' |
   Where-Object TaskName -like 'PriconnerTlScanner-*'
 ```
 
-## 6. 手動実行と試験
+## 5. 手動実行と試験
 
 全ステージを通常実行:
 
