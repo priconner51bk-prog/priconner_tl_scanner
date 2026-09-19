@@ -17,15 +17,9 @@ foreach ($day in 20..30) {
     Unregister-ScheduledTask -TaskName "$taskPrefix-Bootstrap-$day" -TaskPath "\" -Confirm:$false -ErrorAction SilentlyContinue
 }
 $taskCommand = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$bootstrap`""
-$taskName = "$taskPrefix-Bootstrap"
-schtasks.exe /Create `
-    /TN $taskName `
-    /TR $taskCommand `
-    /SC MONTHLY `
-    /D "20,21,22,23,24,25,26,27,28,29,30" `
-    /ST 12:00 `
-    /RU "$env:USERDOMAIN\$env:USERNAME" `
-    /RL LIMITED `
-    /F | Out-Null
+foreach ($day in 20..30) {
+    $taskName = "$taskPrefix-Bootstrap-$day"
+    schtasks.exe /Create /TN $taskName /TR $taskCommand /SC MONTHLY /D $day /ST 12:00 /RU "$env:USERDOMAIN\$env:USERNAME" /RL LIMITED /F | Out-Null
+}
 
-Write-Host "Registered one Priconner TL scanner bootstrap task for days 20-30 for $env:USERDOMAIN\$env:USERNAME"
+Write-Host "Registered 11 Priconner TL scanner bootstrap tasks for days 20-30 for $env:USERDOMAIN\$env:USERNAME"
