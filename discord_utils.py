@@ -182,7 +182,7 @@ def post(text, guild_key="default", channel_key="boss0_tl", files=None):
 
 
 def post_to_configured_guilds(
-    text, channel_key="boss0_tl", files=None, guild_keys=None
+    text, channel_key="boss0_tl", files=None, guild_keys=None, dedupe_key=None
 ):
     from discord_queue import enqueue_for_guilds
 
@@ -192,6 +192,7 @@ def post_to_configured_guilds(
         guild_keys=guild_keys if guild_keys is not None else configured_guild_keys(),
         kind="post",
         files=files,
+        dedupe_key=dedupe_key,
     )
 
 

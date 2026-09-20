@@ -53,9 +53,9 @@ def selected_bosses(boss_names, selection=None):
     return [(index, boss_names[index - 1])]
 
 
-def _post_to_channel(post, text, channel_key):
+def _post_to_channel(post, text, channel_key, dedupe_key=None):
     if post is discord.post:
-        return discord.post_to_configured_guilds(text, channel_key=channel_key)
+        return discord.post_to_configured_guilds(text, channel_key=channel_key, dedupe_key=dedupe_key)
     try:
         return post(text, channel_key=channel_key)
     except TypeError:
@@ -469,7 +469,9 @@ def findYouTubeVideo(
                 item['title'], item['notes'], item['url'],
                 item.get('description', ''), item.get('formatted_tl', ''),
             )
-            _post_to_channel(post, post_tracker.post_content({**item, "text": body}), item["channel_key"])
+            item_content = post_tracker.post_content({**item, "text": body})
+            dedupe_key = f"youtube-new:{item['url']}" if item.get("status") == "new" else None
+            _post_to_channel(post, item_content, item["channel_key"], dedupe_key)
             posted_count += 1
         except Exception as error:
             print(f"失敗: YouTube URL通知 {item['url']}: {error}")

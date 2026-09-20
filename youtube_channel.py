@@ -56,9 +56,9 @@ def _format_youtube_tl(description):
         return ""
 
 
-def _post_configured(post, text, channel_key="boss0_tl"):
+def _post_configured(post, text, channel_key="boss0_tl", dedupe_key=None):
     if post is discord.post:
-        return discord.post_to_configured_guilds(text, channel_key=channel_key)
+        return discord.post_to_configured_guilds(text, channel_key=channel_key, dedupe_key=dedupe_key)
     return post(text)
 
 
@@ -492,7 +492,9 @@ def checkNewArrivalsForYouTube(
                 item['title'], item['notes'], item['url'],
                 item.get('description', ''), item.get('formatted_tl', ''),
             )
-            _post_configured(post, post_tracker.post_content({**item, "text": body}), item.get("channel_key", "boss0_tl"))
+            item_content = post_tracker.post_content({**item, "text": body})
+            dedupe_key = f"youtube-new:{item['url']}" if item.get("status") == "new" else None
+            _post_configured(post, item_content, item.get("channel_key", "boss0_tl"), dedupe_key)
             posted_count += 1
         except Exception as error:
             print(f"失敗: YouTube URL通知 {item['url']}: {error}")
