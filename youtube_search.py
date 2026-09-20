@@ -357,11 +357,11 @@ def findYouTubeVideo(
             if videoUrl in known_video_urls:
                 old = video_rows.get(videoUrl)
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": f"確認用（更新・対象ボス: {bossName}）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "force_full": True})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": "確認用（更新）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "force_full": True})
                 if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": f"確認用（新規・対象ボス: {bossName}）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": "確認用（新規）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
                 if old and len(old[1]) > 3 and post_tracker.normalize_comparison_text(old[1][3]) != post_tracker.normalize_comparison_text(video.title):
-                    notes = f"対象ボス: {bossName}（更新）"
+                    notes = "更新"
                     previous = video_post_body(old[1][3], notes, videoUrl)
                     row = list(old[1]) + [""] * max(0, 6 - len(old[1]))
                     row[3], row[5] = video.title, previous
@@ -421,7 +421,7 @@ def findYouTubeVideo(
             )
             write_arrival("youtube-search", videoTitle, videoUrl, video.publish_date,
                           channel_name=channelName,
-                          notes=f"対象ボス: {bossName}",
+                          notes="",
                           details={"channel_url": channelUrl})
             print(video_values[-1:])
             videoUrls.append(videoUrl)
@@ -429,7 +429,7 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, formatted_tl, f"対象ボス: {bossName}", f"boss{boss_index}_tl"))
+            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, formatted_tl, "", f"boss{boss_index}_tl"))
 
     persist_rows(sheetChannel, sheetVideo, channel_values, video_values)
     channel_updates = []
