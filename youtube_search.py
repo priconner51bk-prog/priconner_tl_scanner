@@ -28,7 +28,8 @@ WAIT_TIME = 2
 DEFAULT_PERIOD_DAYS = 1
 DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 50
-SEARCH_WORKERS = 5
+SEARCH_WORKERS = 3
+SEARCH_RETRIES = 2
 TITLE_SEARCH_MARKERS = {
     "メデューサ": ("メデューサ", "メドューサ"),
 }
@@ -151,6 +152,9 @@ def search_youtube(query, now_factory=None):
         "skip_download": True,
         "extract_flat": False,
         "remote_components": ["ejs:github"],
+        "retries": 1,
+        "extractor_retries": 1,
+        "sleep_interval_requests": 0.5,
         "playlistend": search_limit,
     }
     date_after = os.environ.get("PRICONNER_YOUTUBE_SEARCH_DATE_AFTER", "").strip()
@@ -163,8 +167,20 @@ def search_youtube(query, now_factory=None):
     if search_start.isdigit() and int(search_start) > 1:
         options["playliststart"] = int(search_start)
         options["playlistend"] = int(search_start) + search_limit - 1
-    with YoutubeDL(options) as ydl:
-        result = ydl.extract_info(f"ytsearch{search_limit}:{query}", download=False)
+    result = None
+    for attempt in range(SEARCH_RETRIES + 1):
+        try:
+            with YoutubeDL(options) as ydl:
+                result = ydl.extract_info(
+                    f"ytsearch{search_limit}:{query}", download=False
+                )
+            break
+        except Exception as error:
+            if attempt >= SEARCH_RETRIES:
+                print(f"YouTube検索失敗: query={query!r}: {error}")
+                result = {"entries": []}
+            else:
+                time.sleep(2 ** attempt)
     entries = list((result or {}).get("entries") or [])
 
     result = {**(result or {}), "entries": entries}
