@@ -8,6 +8,7 @@ channel scanner's YTDLPVideo/YTDLPChannel objects.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+import time
 from xml.etree import ElementTree
 
 import requests
@@ -15,6 +16,8 @@ import requests
 RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id={}"
 ATOM = "http://www.w3.org/2005/Atom"
 YT = "http://www.youtube.com/xml/schemas/2015"
+RSS_RETRIES = 3
+RSS_BACKOFF_SECONDS = 1
 
 
 @dataclass
@@ -34,13 +37,38 @@ class RSSVideo:
 
 
 class RSSChannel:
-    def __init__(self, channel_id, timeout=15, session=None):
+    def __init__(self, channel_id, timeout=15, session=None, sleep=time.sleep):
         self.channel_id = channel_id
         self.channel_url = f"https://www.youtube.com/channel/{channel_id}"
         self.feed_url = RSS_URL.format(channel_id)
         client = session or requests
-        response = client.get(self.feed_url, timeout=timeout)
-        response.raise_for_status()
+        response = None
+        for attempt in range(RSS_RETRIES + 1):
+            try:
+                response = client.get(self.feed_url, timeout=timeout)
+                status = getattr(response, "status_code", 200)
+                if status == 429 or status >= 500:
+                    if attempt >= RSS_RETRIES:
+                        response.raise_for_status()
+                        raise requests.HTTPError(f"RSS HTTP {status}")
+                    retry_after = getattr(response, "headers", {}).get("Retry-After")
+                    try:
+                        delay = float(retry_after)
+                    except (TypeError, ValueError):
+                        delay = RSS_BACKOFF_SECONDS * (2 ** attempt)
+                    print(f"RSS一時エラー({status})、{delay:g}秒後に再試行 ({attempt + 1}/{RSS_RETRIES})")
+                    sleep(min(delay, 30))
+                    continue
+                response.raise_for_status()
+                break
+            except requests.RequestException:
+                if attempt >= RSS_RETRIES:
+                    raise
+                delay = RSS_BACKOFF_SECONDS * (2 ** attempt)
+                print(f"RSS通信エラー、{delay:g}秒後に再試行 ({attempt + 1}/{RSS_RETRIES})")
+                sleep(min(delay, 30))
+        if response is None:
+            raise requests.RequestException("RSS response was not received")
         root = ElementTree.fromstring(response.content)
         self.channel_name = root.findtext(f"{{{ATOM}}}title", default="")
         self.videos = []
@@ -68,4 +96,3 @@ def _parse_date(value):
     except ValueError:
         parsed = parsedate_to_datetime(value)
     return parsed.astimezone(timezone.utc)
-

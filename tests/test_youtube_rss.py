@@ -36,3 +36,19 @@ def test_rss_channel_skips_entries_without_video_id():
         def get(self, url, timeout):
             return type("R", (), {"content": b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>x</title></entry></feed>', "raise_for_status": lambda self: None})()
     assert RSSChannel("UC123", session=EmptySession()).videos == []
+
+
+def test_rss_channel_retries_rate_limit_with_retry_after():
+    class LimitedSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                return type("R", (), {"status_code": 429, "headers": {"Retry-After": "0"}, "content": b"", "raise_for_status": lambda self: None})()
+            return Response()
+
+    session = LimitedSession()
+    RSSChannel("UC123", session=session, sleep=lambda _: None)
+    assert session.calls == 2
