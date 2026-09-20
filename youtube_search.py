@@ -421,7 +421,7 @@ def findYouTubeVideo(
             )
             write_arrival("youtube-search", videoTitle, videoUrl, video.publish_date,
                           channel_name=channelName,
-                          notes="",
+                          notes="キーワード検索の新着動画",
                           details={"channel_url": channelUrl})
             print(video_values[-1:])
             videoUrls.append(videoUrl)
@@ -429,7 +429,7 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, formatted_tl, "", f"boss{boss_index}_tl"))
+            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, formatted_tl, "キーワード検索の新着動画", f"boss{boss_index}_tl"))
 
     persist_rows(sheetChannel, sheetVideo, channel_values, video_values)
     channel_updates = []
