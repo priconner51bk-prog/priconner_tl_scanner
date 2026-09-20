@@ -28,7 +28,9 @@ URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # Keep both channel requests and Discord posts serialized.  Discord also has
 # its own API interval/429 retry guard, but this delay protects injected or
 # alternate post implementations used by the scheduled runner.
-WAIT_TIME = 2
+# Discord posts are queued by the normal runner, so a long collector delay is
+# unnecessary. Keep a small configurable pause for alternate/injected senders.
+WAIT_TIME = float(os.environ.get("PRICONNER_YOUTUBE_WAIT", "0.25"))
 DEFAULT_PERIOD_DAYS = 7
 # A bounded page keeps scans predictable while retaining upload dates needed
 # for the current-month safety boundary.

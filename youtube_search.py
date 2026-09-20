@@ -24,7 +24,9 @@ from youtube_common import (
 from youtube_storage import persist_rows
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
-WAIT_TIME = 2
+# The collector normally enqueues Discord work; rate limiting belongs to the
+# single-writer queue drain rather than delaying discovery.
+WAIT_TIME = float(os.environ.get("PRICONNER_YOUTUBE_WAIT", "0.25"))
 DEFAULT_PERIOD_DAYS = 1
 DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 50
