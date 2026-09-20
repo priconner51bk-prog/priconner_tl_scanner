@@ -1,6 +1,7 @@
 import os
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime as DateTime
 from datetime import timezone
 from itertools import islice
@@ -41,6 +42,7 @@ DEFAULT_CHANNEL_LIMIT = 20
 YOUTUBE_SOCKET_TIMEOUT = 15
 YOUTUBE_RETRIES = 1
 USE_RSS_DISCOVERY = os.environ.get("PRICONNER_YOUTUBE_RSS", "1").strip().lower() not in {"0", "false", "no"}
+RSS_WORKERS = 3
 
 
 _as_utc = as_utc
@@ -296,6 +298,34 @@ def checkNewArrivalsForYouTube(
         now, period_days, period_mode, period_month
     )
     channel_updates = []
+    rss_channels = {}
+    if USE_RSS_DISCOVERY and channel_factory is YTDLPChannel:
+        rss_targets = []
+        for row in rows[1:]:
+            if len(row) <= 1 or not row[1] or (len(row) > 6 and row[6]):
+                continue
+            latest_video = row[4] if len(row) > 4 else ""
+            if latest_video:
+                try:
+                    latest_video_at = _as_utc(datetime.string2DateTime(latest_video))
+                except (TypeError, ValueError):
+                    latest_video_at = None
+                if latest_video_at and (now - latest_video_at).total_seconds() > inactive_days * 86400:
+                    continue
+            rss_targets.append(row[1])
+        with ThreadPoolExecutor(max_workers=RSS_WORKERS) as executor:
+            futures = {
+                executor.submit(_rss_channel_for_period, channel_id, period_start): channel_id
+                for channel_id in rss_targets
+            }
+            for future in as_completed(futures):
+                channel_id = futures[future]
+                try:
+                    rss_channels[channel_id] = future.result()
+                except Exception as error:
+                    print(f"RSS並列取得失敗 ({channel_id}): {type(error).__name__}: {error}")
+        print(f"RSS並列取得完了: {len(rss_targets)}チャンネル / 採用{sum(value is not None for value in rss_channels.values())}件")
+
     for i, row in enumerate(rows, start=1):
         if i <= 1:
             continue
@@ -331,7 +361,7 @@ def checkNewArrivalsForYouTube(
         while True:
             if (page_start == 1 and USE_RSS_DISCOVERY
                     and channel_factory is YTDLPChannel):
-                rss_channel = _rss_channel_for_period(channelId, period_start)
+                rss_channel = rss_channels.get(channelId)
                 ch = rss_channel or channel_factory(channelUrl, playlist_start=page_start)
             else:
                 ch = channel_factory(channelUrl, playlist_start=page_start)
