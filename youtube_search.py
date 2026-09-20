@@ -13,7 +13,6 @@ import gspread_utils as gspread
 import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
-from tl_formatting import format_discord_tl
 from video_relevance import is_clan_battle_video, is_relevant_video
 from youtube_common import (
     as_utc,
@@ -61,14 +60,6 @@ def _post_to_channel(post, text, channel_key, dedupe_key=None):
     except TypeError:
         # Keep compatibility with simple injected test callbacks.
         return post(text)
-
-
-def _format_youtube_tl(description):
-    try:
-        return format_discord_tl(description)
-    except (RuntimeError, ValueError) as error:
-        print(f"警告: YouTube概要欄のTL整形を利用できません: {error}")
-        return ""
 
 
 _as_utc = as_utc
@@ -353,13 +344,12 @@ def findYouTubeVideo(
             video = enrich_video(video)
             videoUrl = video.watch_url
             description = getattr(video, "description", "")
-            formatted_tl = _format_youtube_tl(description)
             if videoUrl in known_video_urls:
                 old = video_rows.get(videoUrl)
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": "確認用（更新）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "force_full": True})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "notes": "確認用（更新）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "force_full": True})
                 if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": "確認用（新規）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "notes": "確認用（新規）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
                 if old and len(old[1]) > 3 and post_tracker.normalize_comparison_text(old[1][3]) != post_tracker.normalize_comparison_text(video.title):
                     notes = "更新"
                     previous = video_post_body(old[1][3], notes, videoUrl)
@@ -429,7 +419,7 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, formatted_tl, "キーワード検索の新着動画", f"boss{boss_index}_tl"))
+            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, "", "キーワード検索の新着動画", f"boss{boss_index}_tl"))
 
     persist_rows(sheetChannel, sheetVideo, channel_values, video_values)
     channel_updates = []

@@ -13,7 +13,6 @@ import gspread_utils as gspread
 import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
-from tl_formatting import format_discord_tl
 from youtube_common import (
     as_utc,
     build_youtube_post,
@@ -46,14 +45,6 @@ _as_utc = as_utc
 
 
 _write_urls_with_retry = write_urls_with_retry
-
-
-def _format_youtube_tl(description):
-    try:
-        return format_discord_tl(description)
-    except (RuntimeError, ValueError) as error:
-        print(f"警告: YouTube概要欄のTL整形を利用できません: {error}")
-        return ""
 
 
 def _post_configured(post, text, channel_key="boss0_tl", dedupe_key=None):
@@ -366,7 +357,6 @@ def checkNewArrivalsForYouTube(
 
                 print(f"videoUrl:{videoUrl}")
                 description = getattr(yt, "description", "")
-                formatted_tl = _format_youtube_tl(description)
 
                 publishDate = yt.publish_date
                 if (publishDate is None
@@ -396,7 +386,7 @@ def checkNewArrivalsForYouTube(
                                 period_mode,
                                 period_month,
                             )):
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの確認用（更新）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "updated", "force_full": True})
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "notes": "登録チャンネルの確認用（更新）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "updated", "force_full": True})
                     if (os.environ.get("PRICONNER_FORCE_NEW_POST") and old
                             and is_in_youtube_period(
                                 yt.publish_date,
@@ -405,7 +395,7 @@ def checkNewArrivalsForYouTube(
                                 period_mode,
                                 period_month,
                             )):
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの確認用（新規）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "new"})
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "notes": "登録チャンネルの確認用（新規）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "new"})
                     if old and len(old[1]) > 3 and post_tracker.normalize_comparison_text(old[1][3]) != post_tracker.normalize_comparison_text(yt.title):
                         notes = "登録チャンネルの動画更新"
                         previous = video_post_body(old[1][3], notes, videoUrl)
@@ -450,7 +440,7 @@ def checkNewArrivalsForYouTube(
 
                 count += 1
                 damage_urls.append(videoUrl)
-                pending_posts.append(build_youtube_post(videoUrl, yt.title, description, formatted_tl, "登録チャンネルの新着動画", _boss_channel_key(yt.title, boss_names)))
+                pending_posts.append(build_youtube_post(videoUrl, yt.title, description, "", "登録チャンネルの新着動画", _boss_channel_key(yt.title, boss_names)))
 
             if (stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT
                     or (page_unknown_date and str(period_mode).strip().lower()

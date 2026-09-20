@@ -6,6 +6,7 @@ from datetime import datetime as DateTime
 from datetime import timedelta, timezone
 
 import datetime_utils as datetime
+from tl_formatting import format_discord_tl
 from post_change_tracker import (
     POST_SEPARATOR,
     add_post_separator,
@@ -34,6 +35,15 @@ def build_youtube_post(url, title, description, formatted_tl, notes,
     }
     item.update(extra)
     return item
+
+
+def format_youtube_tl(description):
+    """Format TL text extracted from a YouTube description when available."""
+    try:
+        return format_discord_tl(description)
+    except (RuntimeError, ValueError) as error:
+        print(f"警告: YouTube概要欄のTL整形を利用できません: {error}")
+        return ""
 
 
 def write_urls_with_retry(write_urls, urls, sleep=time.sleep, retries=2):
@@ -135,8 +145,11 @@ def video_post_body(title, notes, url, description="", formatted_tl=""):
     if str(notes or "").strip():
         header += markdown_note_line(notes) + "\n"
     blocks = []
-    description = suppress_discord_embeds(str(description or "").strip())
+    raw_description = str(description or "").strip()
+    description = suppress_discord_embeds(raw_description)
     formatted_tl = suppress_discord_embeds(str(formatted_tl or "").strip())
+    if description and not formatted_tl:
+        formatted_tl = suppress_discord_embeds(format_youtube_tl(raw_description))
     if description:
         blocks.append(("概要欄:\n", description))
     if formatted_tl:

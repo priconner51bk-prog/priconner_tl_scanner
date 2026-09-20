@@ -3,6 +3,8 @@ from post_change_tracker import (
     markdown_note_line,
     suppress_discord_embeds,
 )
+from unittest.mock import patch
+
 from youtube_common import video_post_body
 
 
@@ -22,6 +24,19 @@ def test_video_post_body_includes_description_and_formatted_tl():
     ) < body.index("**備考:** 対象ボス: ボス3")
     assert "概要欄:\n概要欄の本文" in body
     assert "TL（整形済み）:\n```scm\n1:00 キャラ→UB\n```" in body
+
+
+def test_video_post_body_formats_description_in_common_path():
+    with patch("youtube_common.format_discord_tl", return_value="整形済みTL") as formatter:
+        body = video_post_body(
+            "タイトル",
+            "登録チャンネルの新着動画",
+            "https://www.youtube.com/watch?v=abc",
+            "概要欄\n1:00 キャラ→UB",
+        )
+
+    formatter.assert_called_once_with("概要欄\n1:00 キャラ→UB")
+    assert "TL（整形済み）:\n```scm\n整形済みTL\n```" in body
 
 
 def test_video_post_body_omits_empty_notes():
