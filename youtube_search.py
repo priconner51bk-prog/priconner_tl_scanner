@@ -62,17 +62,6 @@ def _post_to_channel(post, text, channel_key):
         return post(text)
 
 
-def _notify_to_channel(notify, text, channel_key):
-    """Keep summary notifications in the same isolated boss channel."""
-    if notify is discord.notify:
-        return discord.notify_to_configured_guilds(text, channel_key=channel_key)
-    try:
-        return notify(text, channel_key=channel_key)
-    except TypeError:
-        # Keep compatibility with simple injected test callbacks.
-        return notify(text)
-
-
 def _format_youtube_tl(description):
     try:
         return format_discord_tl(description)
@@ -269,7 +258,6 @@ def findYouTubeVideo(
     pending_posts = []
     post_failures = Counter()
     posted_count = 0
-    new_count_by_channel = Counter()
     video_sheet_rows = sheetVideo.get_all_values()
     videoUrls = [row[4] for row in video_sheet_rows if len(row) > 4]
     known_video_urls = set(videoUrls)
@@ -414,7 +402,6 @@ def findYouTubeVideo(
             count += 1
             damage_urls.append(videoUrl)
             pending_posts.append({"url": videoUrl, "title": videoTitle, "description": description, "formatted_tl": formatted_tl, "notes": f"対象ボス: {bossName}", "channel_key": f"boss{boss_index}_tl", "status": "new"})
-            new_count_by_channel[f"boss{boss_index}_tl"] += 1
 
     persist_rows(sheetChannel, sheetVideo, channel_values, video_values)
     channel_updates = []
@@ -467,13 +454,6 @@ def findYouTubeVideo(
     )
     for reason, count in post_failures.items():
         print(f"失敗理由 ({count}件): {reason}")
-
-    if count > 0:
-        for channel_key, channel_count in new_count_by_channel.items():
-            try:
-                _notify_to_channel(notify, f"Youtube新着{channel_count}件", channel_key)
-            except Exception as error:
-                print(f"失敗: YouTube集計通知 ({channel_key}): {error}")
 
     if video_values:
         sheetVideo.sort((3, "des"), range="A2:Z10000")

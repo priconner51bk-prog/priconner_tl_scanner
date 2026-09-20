@@ -160,4 +160,4 @@ def test_find_youtube_video_routes_summary_to_selected_boss():
             now_factory=lambda: now,
         )
 
-    assert notified == [("Youtube新着1件", {"channel_key": "boss1_tl"})]
+    assert notified == []

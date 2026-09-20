@@ -61,12 +61,6 @@ def _post_configured(post, text):
     return post(text)
 
 
-def _notify_configured(notify, text):
-    if notify is discord.notify:
-        return discord.notify_to_configured_guilds(text)
-    return notify(text)
-
-
 def _rss_covers_period(channel_id, videos, period_start):
     """RSS is complete only when its oldest dated item crosses the boundary."""
     dates = [_as_utc(getattr(video, "publish_date", None)) for video in videos]
@@ -509,12 +503,6 @@ def checkNewArrivalsForYouTube(
     )
     for reason, count in post_failures.items():
         print(f"失敗理由 ({count}件): {reason}")
-
-    if count > 0:
-        try:
-            _notify_configured(notify, f"Youtube新着{count}件")
-        except Exception as error:
-            print(f"失敗: YouTube集計通知: {error}")
 
     if count > 0:
         sheetVideo.sort((3, "des"), range="A2:Z10000")
