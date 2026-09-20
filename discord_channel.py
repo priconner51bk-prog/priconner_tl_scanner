@@ -370,7 +370,9 @@ def checkNewArrivalsForDiscordChannel(
         print(f"Discord収集投稿を削除: チャンネル={post_channel} 件数={deleted}")
 
     ss = spreadsheet or gspread.getNewArrivalsSheet()
-    known_urls = set(gspread.getDamagesSheet().worksheet("Youtube").col_values(1))
+    known_urls = gspread.existing_column_values(
+        gspread.getDamagesSheet().worksheet("Youtube"), 1
+    )
     initial_known_urls = set(known_urls)
     tracking = ss.worksheet("Discordスキャン")
     tracking_rows = tracking.get_all_values() if hasattr(tracking, "get_all_values") else []

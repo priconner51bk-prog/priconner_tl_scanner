@@ -45,29 +45,36 @@ scope = [
 ]
 _client = None
 _spreadsheets = {}
+_config_parser = None
+_config_mtime = None
 
 
 def _config_value(name):
-    config = ConfigParser()
-    if CONFIG_PATH.exists():
-        config.read(CONFIG_PATH, encoding="utf-8")
     section, key = {
         "GOOGLE_SERVICE_ACCOUNT_JSON": ("google", "service_account_json"),
         "GOOGLE_NEW_ARRIVALS_SPREADSHEET_ID": ("google", "new_arrivals_spreadsheet_id"),
         "GOOGLE_DAMAGES_SPREADSHEET_ID": ("google", "damages_spreadsheet_id"),
         "DISCORD_WEBHOOK_URL": ("discord", "webhook_url"),
     }.get(name, (None, None))
-    if section and config.has_option(section, key):
-        value = config.get(section, key).strip()
+    if section and key:
+        value = get_config_value(section, key)
         if value:
             return value
     return os.environ.get(name)
 
 
 def get_config_value(section, key, fallback=None):
-    config = ConfigParser()
-    if CONFIG_PATH.exists():
-        config.read(CONFIG_PATH, encoding="utf-8")
+    global _config_parser, _config_mtime
+    try:
+        mtime = CONFIG_PATH.stat().st_mtime_ns
+    except OSError:
+        mtime = None
+    if _config_parser is None or _config_mtime != mtime:
+        _config_parser = ConfigParser()
+        if mtime is not None:
+            _config_parser.read(CONFIG_PATH, encoding="utf-8")
+        _config_mtime = mtime
+    config = _config_parser
     if config.has_option(section, key):
         value = config.get(section, key).strip()
         if value:
@@ -127,8 +134,37 @@ def deleteEmptyRows(worksheet):
     rows = worksheet.get_all_values()
     emptyIdx = [i + 1 for i, row in enumerate(rows) if all(cell == "" for cell in row)]
 
-    for start, end in reversed(splitRanges(emptyIdx)):
+    ranges = splitRanges(emptyIdx)
+    if not ranges:
+        return
+
+    spreadsheet = getattr(worksheet, "spreadsheet", None)
+    batch_update = getattr(spreadsheet, "batch_update", None)
+    sheet_id = getattr(worksheet, "id", None)
+    if batch_update and sheet_id is not None:
+        requests = [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": start - 1,
+                        "endIndex": end,
+                    }
+                }
+            }
+            for start, end in reversed(ranges)
+        ]
+        batch_update({"requests": requests})
+        return
+
+    for start, end in reversed(ranges):
         worksheet.delete_rows(start, end)
+
+
+def existing_column_values(worksheet, column=1):
+    """Return non-empty values from one worksheet column as a set."""
+    return {value for value in worksheet.col_values(column) if value}
 
 
 def splitRanges(idxList):

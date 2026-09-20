@@ -1,5 +1,6 @@
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from datetime import datetime as DateTime
 from datetime import timezone
@@ -23,9 +24,13 @@ from youtube_common import (
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
-DEFAULT_PERIOD_DAYS = 7
+DEFAULT_PERIOD_DAYS = 1
 DEFAULT_SEARCH_LIMIT = 20
 MAX_SEARCH_LIMIT = 50
+SEARCH_WORKERS = 5
+TITLE_SEARCH_MARKERS = {
+    "メデューサ": ("メデューサ", "メドューサ"),
+}
 
 
 def selected_bosses(boss_names, selection=None):
@@ -85,6 +90,7 @@ class YTDLPVideo:
             info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
         )
         self.title = info.get("title", "")
+        self.channel_name = info.get("channel") or info.get("uploader", "")
         self.description = info.get("description", "")
         self.tags = info.get("tags", [])
         self.channel_id = info.get("channel_id", "")
@@ -136,6 +142,9 @@ def search_youtube(query, now_factory=None):
         "youtube", "search_limit", DEFAULT_SEARCH_LIMIT, minimum=1, maximum=MAX_SEARCH_LIMIT
     )
     search_limit = max(1, min(search_limit, MAX_SEARCH_LIMIT))
+    env_limit = os.environ.get("PRICONNER_YOUTUBE_SEARCH_LIMIT", "").strip()
+    if env_limit.isdigit():
+        search_limit = max(1, min(int(env_limit), MAX_SEARCH_LIMIT))
     options = {
         "quiet": True,
         "skip_download": True,
@@ -143,8 +152,21 @@ def search_youtube(query, now_factory=None):
         "remote_components": ["ejs:github"],
         "playlistend": search_limit,
     }
+    date_after = os.environ.get("PRICONNER_YOUTUBE_SEARCH_DATE_AFTER", "").strip()
+    date_before = os.environ.get("PRICONNER_YOUTUBE_SEARCH_DATE_BEFORE", "").strip()
+    search_start = os.environ.get("PRICONNER_YOUTUBE_SEARCH_START", "").strip()
+    if date_after:
+        options["dateafter"] = date_after
+    if date_before:
+        options["datebefore"] = date_before
+    if search_start.isdigit() and int(search_start) > 1:
+        options["playliststart"] = int(search_start)
+        options["playlistend"] = int(search_start) + search_limit - 1
     with YoutubeDL(options) as ydl:
         result = ydl.extract_info(f"ytsearch{search_limit}:{query}", download=False)
+    entries = list((result or {}).get("entries") or [])
+
+    result = {**(result or {}), "entries": entries}
     now = _as_utc(now_factory() if now_factory else DateTime.now(timezone.utc))
     videos = []
     seen_urls = set()
@@ -204,8 +226,9 @@ def findYouTubeVideo(
         write_urls = write_urls_to_youtube_sheet
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheetChannel = ss.worksheet("YouTubeチャンネル")
+    channel_sheet_rows = sheetChannel.get_all_values()
     sheetChannelIgnores = [
-        row[3] for row in sheetChannel.get_all_values() if len(row) > 6 and row[6]
+        row[3] for row in channel_sheet_rows if len(row) > 6 and row[6]
     ]
 
     sheetVideo = ss.worksheet("YouTube動画")
@@ -228,13 +251,14 @@ def findYouTubeVideo(
     post_failures = Counter()
     posted_count = 0
     new_count_by_channel = Counter()
-    videoUrls = sheetVideo.col_values(5)
+    video_sheet_rows = sheetVideo.get_all_values()
+    videoUrls = [row[4] for row in video_sheet_rows if len(row) > 4]
     known_video_urls = set(videoUrls)
-    video_rows = {row[4]: (index, row) for index, row in enumerate(sheetVideo.get_all_values()[1:], start=2) if len(row) > 4 and row[4]}
-    channelIds = sheetChannel.col_values(2)
+    video_rows = {row[4]: (index, row) for index, row in enumerate(video_sheet_rows[1:], start=2) if len(row) > 4 and row[4]}
+    channelIds = [row[1] for row in channel_sheet_rows if len(row) > 1]
     channel_rows = {
         row[1]: (index, row)
-        for index, row in enumerate(sheetChannel.get_all_values()[1:], start=2)
+        for index, row in enumerate(channel_sheet_rows[1:], start=2)
         if len(row) > 1 and row[1]
     }
     channel_refreshes = {}
@@ -250,14 +274,39 @@ def findYouTubeVideo(
     channel_values = []
     video_values = []
 
-    for boss_index, bossName in selected_bosses(bossNames):
+    selected = selected_bosses(bossNames)
+    search_jobs = [
+        (boss_index, bossName, search_term)
+        for boss_index, bossName in selected
+        for search_term in TITLE_SEARCH_MARKERS.get(bossName, (bossName,))
+    ]
+    search_results = {}
+    with ThreadPoolExecutor(max_workers=min(SEARCH_WORKERS, len(search_jobs))) as executor:
+        futures = {
+            executor.submit(search_factory, search_term): job
+            for job in search_jobs
+            for search_term in [job[2]]
+        }
+        for future in as_completed(futures):
+            search_results[futures[future]] = future.result()
+
+    for boss_index, bossName in selected:
         print(f"ボス名：{bossName}")
-        keywords = f"{bossName} プリコネ"
-
         nowScanTime = datetime.dateTime2String(now)
-        search = search_factory(keywords)
+        videos = []
+        seen_search_urls = set()
+        # The reference sheet shows many valid titles containing only the
+        # boss name and damage number, without クラバト/4段階/EX markers.
+        search_terms = TITLE_SEARCH_MARKERS.get(bossName, (bossName,))
+        for search_term in search_terms:
+            search = search_results[(boss_index, bossName, search_term)]
+            candidates = search.videos if hasattr(search, "videos") else search
+            for candidate in candidates:
+                if candidate.watch_url not in seen_search_urls:
+                    seen_search_urls.add(candidate.watch_url)
+                    videos.append(candidate)
+        sleep(wait_time)
 
-        videos = search.videos if hasattr(search, "videos") else search
         for video in videos:
             if not is_recent_video(
                 video,
@@ -289,9 +338,8 @@ def findYouTubeVideo(
             if not is_relevant_video(video, (bossName,)):
                 print("skip: not a likely Princess Connect video")
                 continue
-            if not is_clan_battle_video(video):
-                print("skip: not a clan-battle title")
-                continue
+            # A boss-name search is authoritative here; the reference sheet
+            # contains valid titles that omit explicit clan-battle markers.
 
             channelUrl = video.channel_url
             if not channelUrl or not video.channel_id:
@@ -312,6 +360,8 @@ def findYouTubeVideo(
                 )
 
             if channelUrl not in channel_name_cache:
+                channel_name_cache[channelUrl] = getattr(video, "channel_name", "")
+            if not channel_name_cache[channelUrl]:
                 channel_name_cache[channelUrl] = channel_factory(
                     channelUrl
                 ).channel_name
@@ -347,21 +397,30 @@ def findYouTubeVideo(
             pending_posts.append({"url": videoUrl, "title": videoTitle, "description": description, "formatted_tl": formatted_tl, "notes": f"対象ボス: {bossName}", "channel_key": f"boss{boss_index}_tl", "status": "new"})
             new_count_by_channel[f"boss{boss_index}_tl"] += 1
 
-        sleep(wait_time)
-
     if channel_values:
         sheetChannel.insert_rows(channel_values, row=2)
+    channel_updates = []
     for row_number, publish_date, scan_time in channel_refreshes.values():
-        existing = list(sheetChannel.get_all_values()[row_number - 1])
+        existing = list(channel_sheet_rows[row_number - 1])
         while len(existing) < 6:
             existing.append("")
         existing[4] = datetime.dateTime2String(publish_date)
         existing[5] = scan_time
-        sheetChannel.update(
-            f"A{row_number}:F{row_number}",
-            [existing[:6]],
-            value_input_option="USER_ENTERED",
-        )
+        channel_updates.append({
+            "range": f"A{row_number}:F{row_number}",
+            "values": [existing[:6]],
+        })
+    if channel_updates:
+        if hasattr(sheetChannel, "batch_update"):
+            sheetChannel.batch_update(
+                channel_updates, raw=False, value_input_option="USER_ENTERED"
+            )
+        else:
+            for update in channel_updates:
+                sheetChannel.update(
+                    update["range"], update["values"],
+                    value_input_option="USER_ENTERED",
+                )
     if video_values:
         sheetVideo.insert_rows(video_values, row=2)
 
@@ -425,7 +484,7 @@ def write_urls_to_youtube_sheet(urls):
     ss = gspread.getDamagesSheet()
     sheet = ss.worksheet("Youtube")
 
-    existing_urls = set(sheet.col_values(1))
+    existing_urls = gspread.existing_column_values(sheet, 1)
     urls = [url for url in urls if url not in existing_urls]
     if not urls:
         return

@@ -653,12 +653,27 @@ def record_matches_month(record, sheet_rows, target_month):
 
 def save_record_changes(sheet, header, inserts, updates):
     """Persist prepared changes using gspread's range update primitives."""
-    if not sheet.get_all_values() or sheet.get_all_values()[0] != header:
+    existing_rows = sheet.get_all_values()
+    if not existing_rows or existing_rows[0] != header:
         end_col = chr(ord("A") + len(header) - 1)
         sheet.update(f"A1:{end_col}1", [header], value_input_option="USER_ENTERED")
-    for row_number, row in updates:
-        end_col = chr(ord("A") + len(header) - 1)
-        sheet.update(f"A{row_number}:{end_col}{row_number}", [row], value_input_option="USER_ENTERED")
+    end_col = chr(ord("A") + len(header) - 1)
+    if updates and hasattr(sheet, "batch_update"):
+        sheet.batch_update(
+            [
+                {"range": f"A{row_number}:{end_col}{row_number}", "values": [row]}
+                for row_number, row in updates
+            ],
+            raw=False,
+            value_input_option="USER_ENTERED",
+        )
+    else:
+        for row_number, row in updates:
+            sheet.update(
+                f"A{row_number}:{end_col}{row_number}",
+                [row],
+                value_input_option="USER_ENTERED",
+            )
     if inserts:
         sheet.insert_rows(inserts, row=2, value_input_option="USER_ENTERED")
 

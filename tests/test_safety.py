@@ -83,7 +83,10 @@ class SafetyTests(unittest.TestCase):
             def extract_info(self, *_args, **_kwargs):
                 return {"channel": "test", "entries": [None] * 20}
 
-        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
+        with (
+            patch.object(youtube_channel, "PytubeFixChannel", None),
+            patch.object(youtube_channel, "YoutubeDL", FakeYDL),
+        ):
             channel = youtube_channel.YTDLPChannel("https://example.test/channel")
 
         self.assertTrue(captured["ignoreerrors"])
@@ -112,7 +115,10 @@ class SafetyTests(unittest.TestCase):
             def extract_info(self, *_args, **_kwargs):
                 return {"channel": "test", "entries": []}
 
-        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
+        with (
+            patch.object(youtube_channel, "PytubeFixChannel", None),
+            patch.object(youtube_channel, "YoutubeDL", FakeYDL),
+        ):
             youtube_channel.YTDLPChannel("https://example.test/channel", playlist_start=21)
 
         self.assertFalse(captured["extract_flat"])
@@ -143,7 +149,10 @@ class SafetyTests(unittest.TestCase):
                 captured["url"] = url
                 return {"channel": "test", "entries": []}
 
-        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
+        with (
+            patch.object(youtube_channel, "PytubeFixChannel", None),
+            patch.object(youtube_channel, "YoutubeDL", FakeYDL),
+        ):
             youtube_channel.YTDLPChannel("https://example.test/channel/")
 
         self.assertEqual(captured["url"], "https://example.test/channel/videos")
@@ -307,6 +316,7 @@ class SafetyTests(unittest.TestCase):
             patch.object(
                 youtube_search.gspread, "get_config_value", return_value="9999"
             ),
+            patch.object(youtube_search, "PytubeFixSearch", None),
             patch.object(youtube_search, "YoutubeDL", FakeYDL),
         ):
             self.assertEqual(youtube_search.search_youtube("test"), [])
@@ -349,6 +359,7 @@ class SafetyTests(unittest.TestCase):
         now = datetime(2026, 8, 29, tzinfo=timezone.utc)
         with (
             patch.object(youtube_search.gspread, "get_config_value", return_value="20"),
+            patch.object(youtube_search, "PytubeFixSearch", None),
             patch.object(youtube_search, "YoutubeDL", FakeYDL),
         ):
             videos = youtube_search.search_youtube("test", now_factory=lambda: now)

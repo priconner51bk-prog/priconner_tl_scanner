@@ -3,8 +3,14 @@ import time
 from collections import Counter
 from datetime import datetime as DateTime
 from datetime import timezone
+from itertools import islice
 
 from yt_dlp import YoutubeDL
+
+try:
+    from pytubefix import Channel as PytubeFixChannel
+except ImportError:
+    PytubeFixChannel = None
 
 import datetime_utils as datetime
 import discord_utils as discord
@@ -13,7 +19,6 @@ import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from tl_formatting import format_discord_tl
-from video_relevance import is_clan_battle_video
 from youtube_common import (
     as_utc,
     is_in_youtube_period,
@@ -21,6 +26,7 @@ from youtube_common import (
     write_urls_with_retry,
     youtube_period_bounds,
 )
+from youtube_rss import RSSChannel
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # Keep both channel requests and Discord posts serialized.  Discord also has
@@ -33,6 +39,7 @@ DEFAULT_PERIOD_DAYS = 7
 DEFAULT_CHANNEL_LIMIT = 20
 YOUTUBE_SOCKET_TIMEOUT = 15
 YOUTUBE_RETRIES = 1
+USE_RSS_DISCOVERY = os.environ.get("PRICONNER_YOUTUBE_RSS", "1").strip().lower() not in {"0", "false", "no"}
 
 
 _as_utc = as_utc
@@ -59,6 +66,27 @@ def _notify_configured(notify, text):
     if notify is discord.notify:
         return discord.notify_to_configured_guilds(text)
     return notify(text)
+
+
+def _rss_covers_period(channel_id, videos, period_start):
+    """RSS is complete only when its oldest dated item crosses the boundary."""
+    dates = [_as_utc(getattr(video, "publish_date", None)) for video in videos]
+    dates = [value for value in dates if value is not None]
+    return bool(dates) and min(dates) < period_start
+
+
+def _rss_channel_for_period(channel_id, period_start):
+    """Return an RSS channel only when its retained window is sufficient."""
+    try:
+        channel = RSSChannel(channel_id)
+    except Exception as error:
+        print(f"RSS取得失敗、yt-dlpへフォールバック: {type(error).__name__}: {error}")
+        return None
+    if _rss_covers_period(channel_id, channel.videos, period_start):
+        print(f"RSS採用: {channel.channel_name} ({len(channel.videos)}件)")
+        return channel
+    print("RSS保持件数では期間境界に届かないため、yt-dlpへフォールバック")
+    return None
 
 
 class YTDLPVideo:
@@ -118,8 +146,40 @@ class YTDLPChannel:
             "playlistend": playlist_end,
             "playliststart": playlist_start,
         }
-        with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(videos_url, download=False) or {}
+        info = None
+        if PytubeFixChannel is not None:
+            try:
+                channel = PytubeFixChannel(url, client="WEB")
+                entries = []
+                video_iter = iter(channel.videos or [])
+                for video in islice(video_iter, playlist_start - 1, playlist_end):
+                    entries.append({
+                        "id": video.video_id,
+                        "webpage_url": video.watch_url,
+                        "title": video.title,
+                        "description": video.description,
+                        "channel": channel.channel_name,
+                        "uploader": channel.channel_name,
+                        "channel_id": channel.channel_id,
+                        "channel_url": url,
+                        "timestamp": (
+                            video.publish_date.timestamp()
+                            if video.publish_date else None
+                        ),
+                    })
+                info = {
+                    "channel": channel.channel_name,
+                    "channel_url": url,
+                    "entries": entries,
+                }
+            except Exception as error:
+                print(
+                    f"pytubefixチャンネル取得失敗、yt-dlpへフォールバック: "
+                    f"{type(error).__name__}: {error}"
+                )
+        if info is None:
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(videos_url, download=False) or {}
         self.channel_name = info.get("channel") or info.get("uploader", "")
         self.channel_url = info.get("channel_url") or url
         entries = list(info.get("entries") or [])
@@ -217,9 +277,10 @@ def checkNewArrivalsForYouTube(
     posted_count = 0
 
     sheetChannel = ss.worksheet("YouTubeチャンネル")
-    videoUrls = sheetVideo.col_values(5)
+    video_sheet_rows = sheetVideo.get_all_values()
+    videoUrls = [row[4] for row in video_sheet_rows if len(row) > 4]
     known_video_urls = set(videoUrls)
-    video_rows = {row[4]: (index, row) for index, row in enumerate(sheetVideo.get_all_values()[1:], start=2) if len(row) > 4 and row[4]}
+    video_rows = {row[4]: (index, row) for index, row in enumerate(video_sheet_rows[1:], start=2) if len(row) > 4 and row[4]}
     rows = sheetChannel.get_all_values()
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
@@ -233,6 +294,7 @@ def checkNewArrivalsForYouTube(
     period_start, period_end = youtube_period_bounds(
         now, period_days, period_mode, period_month
     )
+    channel_updates = []
     for i, row in enumerate(rows, start=1):
         if i <= 1:
             continue
@@ -266,7 +328,12 @@ def checkNewArrivalsForYouTube(
         page_seen = set()
         page_start = 1
         while True:
-            ch = channel_factory(channelUrl, playlist_start=page_start)
+            if (page_start == 1 and USE_RSS_DISCOVERY
+                    and channel_factory is YTDLPChannel):
+                rss_channel = _rss_channel_for_period(channelId, period_start)
+                ch = rss_channel or channel_factory(channelUrl, playlist_start=page_start)
+            else:
+                ch = channel_factory(channelUrl, playlist_start=page_start)
             page_videos = list(getattr(ch, "videos", []) or [])
             entry_count = getattr(ch, "entry_count", len(page_videos))
             try:
@@ -295,9 +362,6 @@ def checkNewArrivalsForYouTube(
                     continue
 
                 print(f"videoUrl:{videoUrl}")
-                if not is_clan_battle_video(yt):
-                    print("skip: not a clan-battle title")
-                    continue
                 description = getattr(yt, "description", "")
                 formatted_tl = _format_youtube_tl(description)
 
@@ -399,11 +463,10 @@ def checkNewArrivalsForYouTube(
 
         channelValues = [[publishDateString, nowScanTime]]
         try:
-            sheetChannel.update(
-                channelValues,
-                sheetChannel.cell(i, 5).address,
-                value_input_option="USER_ENTERED",
-            )
+            channel_updates.append({
+                "range": f"E{i}:F{i}",
+                "values": channelValues,
+            })
         except Exception as error:
             # The arrival rows are already durable; a metadata update should
             # not suppress the pending URL registration and notifications.
@@ -432,6 +495,18 @@ def checkNewArrivalsForYouTube(
             print(f"失敗: YouTube URL通知 {item['url']}: {error}")
             post_failures[f"{type(error).__name__}: {error}"] += 1
         sleep(wait_time)
+
+    if channel_updates:
+        if hasattr(sheetChannel, "batch_update"):
+            sheetChannel.batch_update(
+                channel_updates, raw=False, value_input_option="USER_ENTERED"
+            )
+        else:
+            for update in channel_updates:
+                sheetChannel.update(
+                    update["range"], update["values"],
+                    value_input_option="USER_ENTERED",
+                )
 
     print(
         f"YouTubeチャンネル投稿結果: 候補{len(post_items)}件 / 成功{posted_count}件 / "
@@ -471,7 +546,7 @@ def write_urls_to_youtube_sheet(urls):
 
     # A partially completed prior write must not create a duplicate URL when
     # this operation is retried.
-    existing_urls = set(sheet.col_values(1))
+    existing_urls = gspread.existing_column_values(sheet, 1)
     urls = [url for url in urls if url not in existing_urls]
     if not urls:
         return
