@@ -4,14 +4,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime as DateTime
 from datetime import timezone
-from itertools import islice
 
 from yt_dlp import YoutubeDL
-
-try:
-    from pytubefix import Channel as PytubeFixChannel
-except ImportError:
-    PytubeFixChannel = None
 
 import datetime_utils as datetime
 import discord_utils as discord
@@ -149,40 +143,8 @@ class YTDLPChannel:
             "playlistend": playlist_end,
             "playliststart": playlist_start,
         }
-        info = None
-        if PytubeFixChannel is not None:
-            try:
-                channel = PytubeFixChannel(url, client="WEB")
-                entries = []
-                video_iter = iter(channel.videos or [])
-                for video in islice(video_iter, playlist_start - 1, playlist_end):
-                    entries.append({
-                        "id": video.video_id,
-                        "webpage_url": video.watch_url,
-                        "title": video.title,
-                        "description": video.description,
-                        "channel": channel.channel_name,
-                        "uploader": channel.channel_name,
-                        "channel_id": channel.channel_id,
-                        "channel_url": url,
-                        "timestamp": (
-                            video.publish_date.timestamp()
-                            if video.publish_date else None
-                        ),
-                    })
-                info = {
-                    "channel": channel.channel_name,
-                    "channel_url": url,
-                    "entries": entries,
-                }
-            except Exception as error:
-                print(
-                    f"pytubefixチャンネル取得失敗、yt-dlpへフォールバック: "
-                    f"{type(error).__name__}: {error}"
-                )
-        if info is None:
-            with YoutubeDL(options) as ydl:
-                info = ydl.extract_info(videos_url, download=False) or {}
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(videos_url, download=False) or {}
         self.channel_name = info.get("channel") or info.get("uploader", "")
         self.channel_url = info.get("channel_url") or url
         entries = list(info.get("entries") or [])

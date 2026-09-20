@@ -83,10 +83,7 @@ class SafetyTests(unittest.TestCase):
             def extract_info(self, *_args, **_kwargs):
                 return {"channel": "test", "entries": [None] * 20}
 
-        with (
-            patch.object(youtube_channel, "PytubeFixChannel", None),
-            patch.object(youtube_channel, "YoutubeDL", FakeYDL),
-        ):
+        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
             channel = youtube_channel.YTDLPChannel("https://example.test/channel")
 
         self.assertTrue(captured["ignoreerrors"])
@@ -115,10 +112,7 @@ class SafetyTests(unittest.TestCase):
             def extract_info(self, *_args, **_kwargs):
                 return {"channel": "test", "entries": []}
 
-        with (
-            patch.object(youtube_channel, "PytubeFixChannel", None),
-            patch.object(youtube_channel, "YoutubeDL", FakeYDL),
-        ):
+        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
             youtube_channel.YTDLPChannel("https://example.test/channel", playlist_start=21)
 
         self.assertFalse(captured["extract_flat"])
@@ -149,10 +143,7 @@ class SafetyTests(unittest.TestCase):
                 captured["url"] = url
                 return {"channel": "test", "entries": []}
 
-        with (
-            patch.object(youtube_channel, "PytubeFixChannel", None),
-            patch.object(youtube_channel, "YoutubeDL", FakeYDL),
-        ):
+        with patch.object(youtube_channel, "YoutubeDL", FakeYDL):
             youtube_channel.YTDLPChannel("https://example.test/channel/")
 
         self.assertEqual(captured["url"], "https://example.test/channel/videos")
