@@ -18,7 +18,7 @@ def test_video_post_body_includes_description_and_formatted_tl():
     assert body.startswith(f"{POST_SEPARATOR}\n")
     assert len(POST_SEPARATOR) == 60
     assert body.index("動画タイトル: タイトル") < body.index(
-        "動画URL: <https://www.youtube.com/watch?v=abc>"
+        "動画URL: https://www.youtube.com/watch?v=abc"
     ) < body.index("**備考:** 対象ボス: ボス3")
     assert "概要欄:\n概要欄の本文" in body
     assert "TL（整形済み）:\n```scm\n1:00 キャラ→UB\n```" in body
@@ -29,7 +29,7 @@ def test_video_post_body_preserves_url_when_middle_content_is_long():
     body = video_post_body("タイトル", "備考", url, "説明" * 3000, "TL" * 3000)
 
     assert len(body) <= 2000
-    assert body.index("動画タイトル: タイトル") < body.index(f"動画URL: <{url}>")
+    assert body.index("動画タイトル: タイトル") < body.index(f"動画URL: {url}")
 
 
 def test_markdown_note_line_formats_label_and_escapes_value_markup():
