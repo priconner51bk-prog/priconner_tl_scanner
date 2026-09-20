@@ -398,6 +398,14 @@ def findYouTubeVideo(
             new_count_by_channel[f"boss{boss_index}_tl"] += 1
 
     if channel_values:
+        # Re-read immediately before insertion. Separate channel/page runs
+        # can otherwise use stale snapshots and insert the same channel twice.
+        current_ids = {
+            row[1]
+            for row in sheetChannel.get_all_values()[1:]
+            if len(row) > 1 and row[1]
+        }
+        channel_values = [row for row in channel_values if row[1] not in current_ids]
         sheetChannel.insert_rows(channel_values, row=2)
     channel_updates = []
     for row_number, publish_date, scan_time in channel_refreshes.values():
