@@ -367,7 +367,7 @@ def findYouTubeVideo(
                     row[3], row[5] = video.title, previous
                     if hasattr(sheetVideo, "update"):
                         sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
-                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": previous, "force_full": True})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": previous})
                 continue
 
             if not is_relevant_video(video, (bossName,)):

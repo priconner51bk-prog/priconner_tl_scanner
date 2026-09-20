@@ -413,7 +413,7 @@ def checkNewArrivalsForYouTube(
                         row[3], row[5] = yt.title, previous
                         if hasattr(sheetVideo, "update"):
                             sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "channel_key": _boss_channel_key(yt.title, boss_names), "status": "updated", "previous_text": previous, "force_full": True})
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "channel_key": _boss_channel_key(yt.title, boss_names), "status": "updated", "previous_text": previous})
                     # Keep scanning known entries inside the configured period
                     # so title updates on older videos are not missed.
                     continue
