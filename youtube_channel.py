@@ -36,7 +36,7 @@ DEFAULT_CHANNEL_LIMIT = 20
 YOUTUBE_SOCKET_TIMEOUT = 15
 YOUTUBE_RETRIES = 1
 USE_RSS_DISCOVERY = os.environ.get("PRICONNER_YOUTUBE_RSS", "1").strip().lower() not in {"0", "false", "no"}
-RSS_WORKERS = 3
+RSS_WORKERS = 5
 
 
 _as_utc = as_utc
