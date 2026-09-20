@@ -20,7 +20,8 @@ $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances IgnoreNew
 
 $definitions = @(
-    @{ Name = "Collector"; Stage = ""; Minutes = 30; Start = "12:00" }
+    @{ Name = "YouTubeChannel"; Stage = "youtube-channel"; Minutes = 15; Start = "12:00" }
+    @{ Name = "YouTubeKeyword"; Stage = "youtube-search"; Minutes = 5; Start = "12:02" }
 )
 
 foreach ($definition in $definitions) {

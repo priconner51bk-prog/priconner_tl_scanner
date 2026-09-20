@@ -178,7 +178,8 @@ def main(argv=None):
         if len(stages) == 1:
             state_runtime_dir = common_runtime_dir / stages[0]
         queue_path = common_runtime_dir / "discord_queue.sqlite3"
-        with acquire_lock(state_runtime_dir / "monitor_runner.lock"):
+        lock_name = "monitor_runner-" + "-".join(stages) + ".lock"
+        with acquire_lock(state_runtime_dir / lock_name):
             return run_stages(stages, state_runtime_dir, queue_path=queue_path)
     except LockBusy:
         print("Another monitor run is already in progress; skipping.")
