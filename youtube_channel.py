@@ -450,7 +450,7 @@ def checkNewArrivalsForYouTube(
 
                 count += 1
                 damage_urls.append(videoUrl)
-                pending_posts.append(build_youtube_post(videoUrl, yt.title, description, formatted_tl, "登録チャンネルの新着動画", _boss_channel_key(yt.title, boss_names)))
+                pending_posts.append(build_youtube_post(videoUrl, yt.title, description, formatted_tl, "", _boss_channel_key(yt.title, boss_names)))
 
             if (stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT
                     or (page_unknown_date and str(period_mode).strip().lower()

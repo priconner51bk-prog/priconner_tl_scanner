@@ -24,6 +24,11 @@ def test_video_post_body_includes_description_and_formatted_tl():
     assert "TL（整形済み）:\n```scm\n1:00 キャラ→UB\n```" in body
 
 
+def test_video_post_body_omits_empty_notes():
+    body = video_post_body("タイトル", "", "https://www.youtube.com/watch?v=abc")
+    assert "備考" not in body
+
+
 def test_video_post_body_preserves_url_when_middle_content_is_long():
     url = "https://www.youtube.com/watch?v=abc"
     body = video_post_body("タイトル", "備考", url, "説明" * 3000, "TL" * 3000)

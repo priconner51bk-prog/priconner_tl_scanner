@@ -131,12 +131,9 @@ def _clip_middle(value, limit):
 
 def video_post_body(title, notes, url, description="", formatted_tl=""):
     """Build a YouTube post with title, URL, then notes in that order."""
-    header = (
-        f"動画タイトル: {title}\n"
-        # Keep the YouTube URL bare so Discord can render its thumbnail.
-        f"動画URL: {url}\n"
-        f"{markdown_note_line(notes)}"
-    )
+    header = f"動画タイトル: {title}\n動画URL: {url}\n"
+    if str(notes or "").strip():
+        header += markdown_note_line(notes) + "\n"
     blocks = []
     description = suppress_discord_embeds(str(description or "").strip())
     formatted_tl = suppress_discord_embeds(str(formatted_tl or "").strip())
