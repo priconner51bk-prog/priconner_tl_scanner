@@ -538,7 +538,7 @@ class SafetyTests(unittest.TestCase):
         self.assertIn("動画タイトル: title", posted[0])
         self.assertIn("**備考:** Discordメッセージから検出", posted[0])
         self.assertIn("動画URL: <https://www.youtube.com/watch?v=new1>", posted[0])
-        self.assertEqual(notified, [])
+        self.assertEqual(notified, ["Discord新着1件"])
 
     def test_token_fetch_saves_token_into_config(self):
         with tempfile.TemporaryDirectory() as directory:
