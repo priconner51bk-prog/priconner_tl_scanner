@@ -17,6 +17,7 @@ from tl_formatting import format_discord_tl
 from video_relevance import is_clan_battle_video, is_relevant_video
 from youtube_common import (
     as_utc,
+    build_youtube_post,
     is_in_youtube_period,
     video_post_body,
     write_urls_with_retry,
@@ -428,7 +429,7 @@ def findYouTubeVideo(
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append({"url": videoUrl, "title": videoTitle, "description": description, "formatted_tl": formatted_tl, "notes": f"対象ボス: {bossName}", "channel_key": f"boss{boss_index}_tl", "status": "new"})
+            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, formatted_tl, f"対象ボス: {bossName}", f"boss{boss_index}_tl"))
 
     persist_rows(sheetChannel, sheetVideo, channel_values, video_values)
     channel_updates = []

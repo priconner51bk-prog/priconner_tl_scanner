@@ -16,6 +16,7 @@ from runtime_utils import run_locked
 from tl_formatting import format_discord_tl
 from youtube_common import (
     as_utc,
+    build_youtube_post,
     is_in_youtube_period,
     video_post_body,
     write_urls_with_retry,
@@ -449,7 +450,7 @@ def checkNewArrivalsForYouTube(
 
                 count += 1
                 damage_urls.append(videoUrl)
-                pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの新着動画", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "new"})
+                pending_posts.append(build_youtube_post(videoUrl, yt.title, description, formatted_tl, "登録チャンネルの新着動画", _boss_channel_key(yt.title, boss_names)))
 
             if (stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT
                     or (page_unknown_date and str(period_mode).strip().lower()

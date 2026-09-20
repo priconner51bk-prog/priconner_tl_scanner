@@ -20,6 +20,22 @@ def as_utc(value):
     return value.astimezone(timezone.utc)
 
 
+def build_youtube_post(url, title, description, formatted_tl, notes,
+                       channel_key, status="new", **extra):
+    """Create the shared posting form used by channel and keyword scans."""
+    item = {
+        "url": url,
+        "title": title,
+        "description": description,
+        "formatted_tl": formatted_tl,
+        "notes": notes,
+        "channel_key": channel_key,
+        "status": status,
+    }
+    item.update(extra)
+    return item
+
+
 def write_urls_with_retry(write_urls, urls, sleep=time.sleep, retries=2):
     for attempt in range(retries + 1):
         try:
