@@ -27,6 +27,7 @@ from youtube_common import (
     youtube_period_bounds,
 )
 from youtube_rss import RSSChannel
+from youtube_storage import persist_rows
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # Keep both channel requests and Discord posts serialized.  Discord also has
@@ -456,7 +457,7 @@ def checkNewArrivalsForYouTube(
             page_start += DEFAULT_CHANNEL_LIMIT
 
         if len(videoValues) > 0:
-            sheetVideo.insert_rows(videoValues, row=2)
+            persist_rows(sheetChannel, sheetVideo, [], videoValues)
 
             # Defer notifications until both the arrival rows and damage URLs
             # have had a chance to become durable.

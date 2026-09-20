@@ -21,6 +21,7 @@ from youtube_common import (
     video_post_body,
     write_urls_with_retry,
 )
+from youtube_storage import persist_rows
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 WAIT_TIME = 2
@@ -397,16 +398,7 @@ def findYouTubeVideo(
             pending_posts.append({"url": videoUrl, "title": videoTitle, "description": description, "formatted_tl": formatted_tl, "notes": f"対象ボス: {bossName}", "channel_key": f"boss{boss_index}_tl", "status": "new"})
             new_count_by_channel[f"boss{boss_index}_tl"] += 1
 
-    if channel_values:
-        # Re-read immediately before insertion. Separate channel/page runs
-        # can otherwise use stale snapshots and insert the same channel twice.
-        current_ids = {
-            row[1]
-            for row in sheetChannel.get_all_values()[1:]
-            if len(row) > 1 and row[1]
-        }
-        channel_values = [row for row in channel_values if row[1] not in current_ids]
-        sheetChannel.insert_rows(channel_values, row=2)
+    persist_rows(sheetChannel, sheetVideo, channel_values, video_values)
     channel_updates = []
     for row_number, publish_date, scan_time in channel_refreshes.values():
         existing = list(channel_sheet_rows[row_number - 1])
@@ -429,9 +421,6 @@ def findYouTubeVideo(
                     update["range"], update["values"],
                     value_input_option="USER_ENTERED",
                 )
-    if video_values:
-        sheetVideo.insert_rows(video_values, row=2)
-
     try:
         _write_urls_with_retry(write_urls, damage_urls, sleep)
     except Exception as error:
