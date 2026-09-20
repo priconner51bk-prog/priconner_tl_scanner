@@ -141,7 +141,9 @@ def search_youtube(query, now_factory=None):
     options = {
         "quiet": True,
         "skip_download": True,
-        "extract_flat": False,
+        # Discovery only: fetch IDs/titles/dates first.  Descriptions and tags
+        # are fetched later only for candidates that survive the cheap filters.
+        "extract_flat": True,
         "remote_components": ["ejs:github"],
         "retries": 1,
         "extractor_retries": 1,
@@ -193,6 +195,28 @@ def search_youtube(query, now_factory=None):
         ):
             videos.append(video)
     return videos
+
+
+def enrich_video(video):
+    """Fetch full metadata for one search candidate when it is actually used."""
+    try:
+        with YoutubeDL(
+            {
+                "quiet": True,
+                "skip_download": True,
+                "extract_flat": False,
+                "ignoreerrors": True,
+                "retries": 1,
+                "extractor_retries": 1,
+                "remote_components": ["ejs:github"],
+            }
+        ) as ydl:
+            info = ydl.extract_info(video.watch_url, download=False)
+        if info:
+            return YTDLPVideo(info)
+    except Exception as error:
+        print(f"YouTube詳細情報取得失敗、候補情報を使用: {video.watch_url}: {error}")
+    return video
 
 
 def is_recent_video(
@@ -323,6 +347,9 @@ def findYouTubeVideo(
                 period_month=period_month,
             ):
                 continue
+            # Search results are intentionally flat.  Only period-matching
+            # candidates reach this more expensive metadata request.
+            video = enrich_video(video)
             videoUrl = video.watch_url
             description = getattr(video, "description", "")
             formatted_tl = _format_youtube_tl(description)
