@@ -17,6 +17,11 @@ import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from tl_formatting import extract_tl_text, format_discord_tl
+from video_relevance import (
+    clan_battle_filter_reason,
+    load_content_period,
+    load_ng_terms,
+)
 
 DISCORD_API = "https://discord.com/api/v10"
 WAIT_TIME = 0
@@ -294,10 +299,7 @@ def _post_to_assigned_boss(post, content, source_boss=None):
 
 def _notify_assigned_boss(notify, content):
     if notify is discord.notify:
-        return discord.notify_to_configured_guilds(
-            content,
-            channel_key=os.environ.get("PRICONNER_POST_CHANNEL", "boss0_tl"),
-        )
+        return discord.notify_summary_to_configured_guilds(content)
     return notify(content)
 
 
@@ -375,6 +377,20 @@ def checkNewArrivalsForDiscordChannel(
     )
     initial_known_urls = set(known_urls)
     tracking = ss.worksheet("Discordスキャン")
+    try:
+        boss_rows = ss.worksheet("ボス名").get_all_values()
+        boss_names = [row[0] for row in boss_rows[1:] if row and row[0]]
+    except Exception:
+        boss_names = []
+    ng_terms = load_ng_terms(ss)
+    content_month = gspread.get_config_value("youtube", "content_month", "")
+    if not content_month:
+        content_month = gspread.get_config_value("youtube", "period_month", "")
+    content_period_start = gspread.get_config_value("youtube", "content_period_start", "")
+    content_period_end = gspread.get_config_value("youtube", "content_period_end", "")
+    content_period_start, content_period_end = load_content_period(
+        ss, content_month, content_period_start, content_period_end
+    )
     tracking_rows = tracking.get_all_values() if hasattr(tracking, "get_all_values") else []
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
     processed_urls = set()
@@ -441,6 +457,17 @@ def checkNewArrivalsForDiscordChannel(
                     known_urls.add(tracking_key)
                     info = video_info_factory(source_url)
                     title = info.get("title") or source_url
+                    rejection = clan_battle_filter_reason(
+                        info,
+                        boss_names=boss_names[:5],
+                        ng_terms=ng_terms,
+                        content_month=content_month,
+                        content_period_start=content_period_start,
+                        content_period_end=content_period_end,
+                    )
+                    if rejection:
+                        print(f"skip: Discord経由YouTube内容フィルタ ({rejection}): {title}")
+                        continue
                 else:
                     info = {"publish_date": None, "channel_name": "Discord"}
                     title = f"Discord投稿 {message.get('id') or channel_id}"
@@ -546,7 +573,8 @@ def checkNewArrivalsForDiscordChannel(
                     status = "new" if not old else ("updated" if len(old[1]) < 3 or old[1][2] != digest else "same")
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
                     status = "updated"
-                if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
+                if (os.environ.get("PRICONNER_FORCE_NEW_POST")
+                        or os.environ.get("PRICONNER_REPOST_NEW")) and old:
                     status = "new"
                 if status == "same":
                     if not old:

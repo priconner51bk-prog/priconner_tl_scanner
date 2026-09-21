@@ -5,7 +5,12 @@ from post_change_tracker import (
 )
 from unittest.mock import patch
 
-from youtube_common import video_post_body
+from youtube_common import (
+    VIDEO_HEADERS,
+    build_video_sheet_row,
+    video_metadata_fields,
+    video_post_body,
+)
 
 
 def test_video_post_body_includes_description_and_formatted_tl():
@@ -24,6 +29,26 @@ def test_video_post_body_includes_description_and_formatted_tl():
     ) < body.index("**備考:** 対象ボス: ボス3")
     assert "概要欄:\n概要欄の本文" in body
     assert "TL（整形済み）:\n```scm\n1:00 キャラ→UB\n```" in body
+
+
+def test_video_metadata_is_persisted_with_the_exact_post_body():
+    with patch("youtube_common.format_discord_tl", return_value="整形済みTL"):
+        description, formatted_tl, body = video_metadata_fields(
+            "タイトル",
+            "キーワード検索の新着動画",
+            "https://www.youtube.com/watch?v=abc",
+            "概要欄\n1:00 キャラ→UB",
+        )
+    row = build_video_sheet_row(
+        "チャンネル", "https://www.youtube.com/channel/c", "2026/08/30",
+        "タイトル", "https://www.youtube.com/watch?v=abc",
+        "キーワード検索の新着動画", description, formatted_tl, body,
+    )
+    assert len(row) == len(VIDEO_HEADERS) == 9
+    assert row[5] == "キーワード検索の新着動画"
+    assert row[6] == "概要欄\n1:00 キャラ→UB"
+    assert row[7] == "整形済みTL"
+    assert row[8] == body
 
 
 def test_video_post_body_formats_description_in_common_path():

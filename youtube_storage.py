@@ -1,8 +1,24 @@
 """Shared persistence helpers for RSS and keyword YouTube collectors."""
 
+from youtube_common import VIDEO_HEADERS
+
+
+def ensure_video_headers(sheet_video):
+    """Upgrade the arrivals tab to the replay-safe video schema."""
+    rows = sheet_video.get_all_values()
+    if not rows or rows[0] == VIDEO_HEADERS or not hasattr(sheet_video, "update"):
+        return
+    end_column = chr(ord("A") + len(VIDEO_HEADERS) - 1)
+    sheet_video.update(
+        f"A1:{end_column}1",
+        [VIDEO_HEADERS],
+        value_input_option="USER_ENTERED",
+    )
+
 
 def persist_rows(sheet_channel, sheet_video, channel_values, video_values):
     """Insert only new channel IDs and video URLs in one place."""
+    ensure_video_headers(sheet_video)
     if channel_values:
         existing_channels = {
             row[1]

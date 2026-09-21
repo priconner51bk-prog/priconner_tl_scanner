@@ -113,6 +113,27 @@ def configured_guild_keys(test_only=None):
     return [default_key] if default_key in config.get("guilds", {}) else []
 
 
+def configured_summary_guild_keys(test_only=None):
+    """Return guilds that receive summary notifications.
+
+    Normal posts follow ``scheduled_guild_keys``.  Summaries have their own
+    routing so an experimental summary channel can be included without
+    duplicating every normal TL post there.
+    """
+    config = _channel_config()
+    if test_only is None:
+        test_only = _is_test_post()
+    if test_only:
+        return configured_guild_keys(test_only=True)
+    configured = config.get("summary_guild_keys") or []
+    return [key for key in configured if key in config.get("guilds", {})]
+
+
+def summary_channel_key(guild_key):
+    config = _channel_config()
+    return config.get("summary_channel_keys", {}).get(guild_key, "boss0_tl")
+
+
 def channel_id(guild_key, channel_key):
     config = _channel_config()
     resolved_key = _resolve_guild_key(config, guild_key)
@@ -206,6 +227,22 @@ def notify_to_configured_guilds(text, channel_key="boss0_tl", guild_keys=None):
         kind="notify",
         dedupe_key=None,
     )
+
+
+def notify_summary_to_configured_guilds(text, guild_keys=None):
+    """Queue a summary using each guild's configured summary channel."""
+    if guild_keys is None:
+        guild_keys = configured_summary_guild_keys()
+    queued = []
+    for guild_key in guild_keys:
+        queued.extend(
+            notify_to_configured_guilds(
+                text,
+                channel_key=summary_channel_key(guild_key),
+                guild_keys=[guild_key],
+            )
+        )
+    return queued
 
 
 def boss_channel_key(code):

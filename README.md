@@ -58,6 +58,7 @@ python monitor_runner.py --stages youtube-channel
 - `config.ini.org` を `config.ini` にコピーして、Google Sheets・Discord・監視期間を設定する。
 - `config.ini`、`.env`、認証JSON、`discord_channels.json`、実行状態はGit管理外に置く。
 - YouTubeの期間は `[youtube] period_mode=current_month` を基本とする。固定月試験は `target_month`、日数指定は `days` を使用する。
+- YouTubeの内容月・クラバト（トレーニングを含む）期間は `[youtube] content_month` と `content_period_start/end` で指定し、対象外期間の動画、対象外月のクラバト表記、他ゲーム、SP・イベント動画は取得しない。追加の除外語は新着スプレッドシートの `NGワード` シートで管理する。
 - `PRICONNER_YOUTUBE_BOSS_INDEX=1`〜`5` で検索対象ボスを限定できる。チャンネル監視を併用する場合は `PRICONNER_ALLOW_SHARED_CHANNEL_SCAN=1` が必要。
 - Discord投稿の送信にはBotトークン、Discordチャンネルの読み取りには `[discord_channel] token` または `DISCORD_TOKEN` を使用する。
 - TLフォーマッタは任意依存です。利用できない場合も走査・URL投稿は継続しますが、TL本文の自動整形は省略されます。

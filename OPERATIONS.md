@@ -53,6 +53,14 @@ python discord_queue.py
 
 これは外部へ投稿する操作です。実行前にキュー内容と送信先を確認してください。キュー送信タスクは同時実行ロックを持つため、前回の送信中に次回が起動しても二重送信しません。
 
+スプレッドシートに保存済みの8月分を、本番のboss0〜5へ新規扱いでキューへ再構築する場合:
+
+```sh
+python rebuild_discord_queue_from_sheets.py --prepare --target-month 2026-08
+```
+
+この操作はYouTube・Discordの再検索を行わず、`YouTube動画`、`Discordスキャン`、`WorryChefs TL` の保存行だけを読みます。WorryChefsは保存済み行を全件対象にします。`--prepare` はキュー投入までで、送信は `python discord_queue.py` または有効な送信タスクが行います。
+
 ## 4. 状態・失敗確認
 
 既定の状態保存先は次のとおりです。
@@ -84,6 +92,10 @@ Get-ScheduledTask -TaskPath '\' |
 収集ステージは内部の処理単位です。スケジューラーには収集タスクを1つだけ登録し、内部で順番に実行します。
 
 YouTube登録チャンネルは、最新動画投稿日から `maintenance.inactive_days` 日を超えると通常走査を省略します。そのチャンネルの動画がYouTube検索で見つかった場合は、検索結果を保存し、最新投稿日を更新します。
+
+YouTubeは公開日だけでなく、`[youtube] content_month` と `[youtube] content_period_start/end`（トレーニング期間を含む）、動画内容も確認します。対象外期間・対象外月のクラバト、`NGワード` シートに登録された他ゲーム・イベント動画は、スプレッドシート・Discordキューへ登録しません。
+
+`YouTube動画` タブには、動画備考・概要欄・TL整形・投稿直前本文も保存します。RSSの簡易情報から概要欄を取得できない場合は、不完全な行やDiscord投稿を作成せず、その動画を保留してログに不足理由を出します。保存済み本文がない行からのキュー再構築も停止します。
 
 ## 5. 手動実行と試験
 

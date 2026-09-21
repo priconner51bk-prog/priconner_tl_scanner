@@ -149,7 +149,7 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://example.test/channel/videos")
         self.assertFalse(captured["extract_flat"])
 
-    def test_registered_channel_accepts_video_without_relevance_terms(self):
+    def test_registered_channel_rejects_video_without_clan_battle_terms(self):
         class FakeSheet:
             def __init__(self, rows):
                 self.rows = rows
@@ -211,8 +211,7 @@ class SafetyTests(unittest.TestCase):
                 now_factory=lambda: now,
             )
 
-        self.assertEqual(len(video_sheet.inserted), 1)
-        self.assertEqual(video_sheet.inserted[0][4], video.watch_url)
+        self.assertEqual(video_sheet.inserted, [])
 
     def test_channel_scan_is_skipped_for_isolated_boss_worker(self):
         with patch.dict("os.environ", {"PRICONNER_YOUTUBE_BOSS_INDEX": "3"}, clear=False), \
@@ -271,8 +270,7 @@ class SafetyTests(unittest.TestCase):
                 now_factory=lambda: datetime(2026, 8, 29, 12, 0),
             )
 
-        self.assertEqual(len(video_sheet.inserted), 1)
-        self.assertEqual(video_sheet.inserted[0][4], video.watch_url)
+        self.assertEqual(video_sheet.inserted, [])
 
     def test_parse_stages_removes_duplicate_stage_names(self):
         self.assertEqual(
@@ -520,7 +518,7 @@ class SafetyTests(unittest.TestCase):
 
             def fake_video_info(url):
                 return {
-                    "title": "title",
+                    "title": "プリコネ クラバト TL",
                     "publish_date": None,
                     "channel_name": "channel",
                 }
@@ -535,7 +533,7 @@ class SafetyTests(unittest.TestCase):
 
         self.assertEqual(sheet.written, [["https://www.youtube.com/watch?v=new1"]])
         self.assertEqual(len(posted), 1)
-        self.assertIn("動画タイトル: title", posted[0])
+        self.assertIn("動画タイトル: プリコネ クラバト TL", posted[0])
         self.assertIn("**備考:** Discordメッセージから検出", posted[0])
         self.assertIn("動画URL: <https://www.youtube.com/watch?v=new1>", posted[0])
         self.assertEqual(notified, ["Discord新着1件"])

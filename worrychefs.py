@@ -716,6 +716,9 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
         reset_discord or force_post or alternate_new_update
         or target_code or source_kind or target_boss or target_month
     )
+    repost_new = bool(os.environ.get("PRICONNER_REPOST_NEW"))
+    if repost_new:
+        test_only = False
     post_guild_keys = discord.configured_guild_keys(test_only=test_only)
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheet = ss.worksheet("WorryChefs TL")
@@ -742,7 +745,17 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
         save_record_changes(sheet, header, inserts, updates)
     # 通常時はシート上のハッシュで重複投稿を防止する。
     # リセット時または明示的な強制投稿時は、選択フィルタ内の全件を投稿する。
-    if reset_discord or force_post:
+    if repost_new and target_month:
+        changed_keys = {
+            record["key"] for record in records
+            if record_matches_month(record, sheet_rows, target_month)
+        }
+        for record in records:
+            if record["key"] in changed_keys:
+                record["status"] = "new"
+                record["force_full"] = True
+                record.pop("previous_text", None)
+    elif reset_discord or force_post:
         changed_keys = {record["key"] for record in records
                         if (source_kind is None or record.get("source") == source_kind
                             or (source_kind == "manual" and str(record.get("source", "")).startswith("manual-")))
@@ -1109,7 +1122,7 @@ def notify_tl_values(notify, link_url, values):
     text = "\n".join(row[0] for row in tl_values)
     content = f"[WorryChefs]({link_url})\n```cs\n{text}```"
     if notify is discord.notify:
-        discord.notify_to_configured_guilds(content)
+        discord.notify_summary_to_configured_guilds(content)
     else:
         notify(content)
 

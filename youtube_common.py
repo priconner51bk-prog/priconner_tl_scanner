@@ -61,7 +61,14 @@ def unique_urls(urls):
     return list(dict.fromkeys(url for url in urls if url))
 
 
-VIDEO_HEADERS = ["チャンネル名", "チャンネルURL", "投稿日", "動画タイトル", "動画URL", "投稿直前本文"]
+VIDEO_HEADERS = [
+    "チャンネル名", "チャンネルURL", "投稿日", "動画タイトル", "動画URL",
+    "動画備考", "概要欄", "TL整形", "投稿直前本文",
+]
+VIDEO_NOTES_INDEX = 5
+VIDEO_DESCRIPTION_INDEX = 6
+VIDEO_FORMATTED_TL_INDEX = 7
+VIDEO_POST_BODY_INDEX = 8
 
 
 def _month_start(year, month):
@@ -170,3 +177,42 @@ def video_post_body(title, notes, url, description="", formatted_tl=""):
         rendered.append(prefix + clipped)
         available -= len(prefix) + len(clipped) + 2
     return add_post_separator("\n\n".join([header, *rendered]))
+
+
+def build_video_sheet_row(
+    channel_name,
+    channel_url,
+    published_at,
+    title,
+    url,
+    notes,
+    description,
+    formatted_tl,
+    post_body=None,
+):
+    """Return one durable YouTube row with all fields needed for replay."""
+    if post_body is None:
+        post_body = video_post_body(
+            title, notes, url, description, formatted_tl
+        )
+    return [
+        channel_name,
+        channel_url,
+        published_at,
+        title,
+        url,
+        notes,
+        description,
+        formatted_tl,
+        post_body,
+    ]
+
+
+def video_metadata_fields(title, notes, url, description):
+    """Normalize fetched metadata and build the exact post body once."""
+    description = str(description or "").strip()
+    formatted_tl = format_youtube_tl(description) if description else ""
+    post_body = video_post_body(
+        title, notes, url, description, formatted_tl
+    )
+    return description, formatted_tl, post_body

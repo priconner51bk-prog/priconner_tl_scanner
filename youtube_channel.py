@@ -13,16 +13,23 @@ import gspread_utils as gspread
 import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
+from video_relevance import (
+    clan_battle_filter_reason,
+    load_content_period,
+    load_ng_terms,
+)
 from youtube_common import (
     as_utc,
     build_youtube_post,
+    build_video_sheet_row,
     is_in_youtube_period,
+    video_metadata_fields,
     video_post_body,
     write_urls_with_retry,
     youtube_period_bounds,
 )
 from youtube_rss import RSSChannel
-from youtube_storage import persist_rows
+from youtube_storage import ensure_video_headers, persist_rows
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # Keep both channel requests and Discord posts serialized.  Discord also has
@@ -155,6 +162,41 @@ class YTDLPChannel:
                 continue
 
 
+def enrich_rss_video(video):
+    """Fetch full metadata for an RSS-discovered video before using it."""
+    try:
+        with YoutubeDL(
+            {
+                "quiet": True,
+                "skip_download": True,
+                "extract_flat": False,
+                "ignoreerrors": True,
+                "retries": YOUTUBE_RETRIES,
+                "extractor_retries": YOUTUBE_RETRIES,
+                "remote_components": ["ejs:github"],
+            }
+        ) as ydl:
+            info = ydl.extract_info(video.watch_url, download=False) or {}
+        if info and info.get("id"):
+            return YTDLPVideo(info)
+    except Exception as error:
+        print(f"YouTube詳細情報取得失敗: {video.watch_url}: {error}")
+    return video
+
+
+def _complete_video_row(old_row, channel_name, channel_url, published_at,
+                        title, url, notes, description, formatted_tl, body):
+    """Merge fetched metadata into old rows without losing legacy columns."""
+    values = list(old_row or [])
+    while len(values) < 9:
+        values.append("")
+    values[:9] = build_video_sheet_row(
+        channel_name, channel_url, published_at, title, url, notes,
+        description, formatted_tl, body,
+    )
+    return values[:9]
+
+
 def updateYouTubeChannelIdList():
     print("YouTubeチャンネルID情報の更新")
 
@@ -231,6 +273,7 @@ def checkNewArrivalsForYouTube(
         write_urls = write_urls_to_youtube_sheet
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheetVideo = ss.worksheet("YouTube動画")
+    ensure_video_headers(sheetVideo)
     count = 0
     damage_urls = []
     pending_posts = []
@@ -253,6 +296,13 @@ def checkNewArrivalsForYouTube(
     )
     period_mode = gspread.get_config_value("youtube", "period_mode", "days")
     period_month = gspread.get_config_value("youtube", "period_month", "")
+    content_month = gspread.get_config_value("youtube", "content_month", period_month)
+    content_period_start = gspread.get_config_value("youtube", "content_period_start", "")
+    content_period_end = gspread.get_config_value("youtube", "content_period_end", "")
+    content_period_start, content_period_end = load_content_period(
+        ss, content_month, content_period_start, content_period_end
+    )
+    ng_terms = load_ng_terms(ss)
     inactive_days = gspread.get_int_config_value(
         "maintenance", "inactive_days", 60, minimum=1
     )
@@ -346,6 +396,8 @@ def checkNewArrivalsForYouTube(
             if not page_videos:
                 break
 
+            rss_page = isinstance(ch, RSSChannel)
+
             stop_channel = False
             page_unknown_date = False
             for yt in page_videos:
@@ -356,6 +408,8 @@ def checkNewArrivalsForYouTube(
                     continue
 
                 print(f"videoUrl:{videoUrl}")
+                if rss_page:
+                    yt = enrich_rss_video(yt)
                 description = getattr(yt, "description", "")
 
                 publishDate = yt.publish_date
@@ -376,8 +430,43 @@ def checkNewArrivalsForYouTube(
                         # the requested target month.
                         continue
 
+                rejection = clan_battle_filter_reason(
+                    yt,
+                    boss_names=boss_names[:5],
+                    ng_terms=ng_terms,
+                    content_month=content_month,
+                    content_period_start=content_period_start,
+                    content_period_end=content_period_end,
+                )
+                if rejection:
+                    print(f"skip: YouTube内容フィルタ ({rejection}): {yt.title}")
+                    continue
+
+                notes = "登録チャンネルの新着動画"
+                description, formatted_tl, current_body = video_metadata_fields(
+                    yt.title, notes, videoUrl, description
+                )
+                if not description:
+                    print(
+                        f"skip: YouTube詳細情報不足（概要欄なし）: {videoUrl}"
+                    )
+                    continue
+
                 if videoUrl in known_video_urls:
                     old = video_rows.get(videoUrl)
+                    if old and hasattr(sheetVideo, "update"):
+                        merged_row = _complete_video_row(
+                            old[1], channelName, channelUrl,
+                            datetime.dateTime2String(yt.publish_date),
+                            yt.title, videoUrl, notes, description,
+                            formatted_tl, current_body,
+                        )
+                        if list(old[1][:9]) != merged_row:
+                            sheetVideo.update(
+                                f"A{old[0]}:I{old[0]}",
+                                [merged_row],
+                                value_input_option="USER_ENTERED",
+                            )
                     if (os.environ.get("PRICONNER_FORCE_POST") and old
                             and is_in_youtube_period(
                                 yt.publish_date,
@@ -386,8 +475,9 @@ def checkNewArrivalsForYouTube(
                                 period_mode,
                                 period_month,
                             )):
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "notes": "登録チャンネルの確認用（更新）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "updated", "force_full": True})
-                    if (os.environ.get("PRICONNER_FORCE_NEW_POST") and old
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの確認用（更新）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "updated", "force_full": True})
+                    if ((os.environ.get("PRICONNER_FORCE_NEW_POST")
+                         or os.environ.get("PRICONNER_REPOST_NEW")) and old
                             and is_in_youtube_period(
                                 yt.publish_date,
                                 now,
@@ -395,14 +485,21 @@ def checkNewArrivalsForYouTube(
                                 period_mode,
                                 period_month,
                             )):
-                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "notes": "登録チャンネルの確認用（新規）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "new"})
+                        pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": "登録チャンネルの確認用（新規）", "channel_key": _boss_channel_key(yt.title, boss_names), "status": "new"})
                     if old and len(old[1]) > 3 and post_tracker.normalize_comparison_text(old[1][3]) != post_tracker.normalize_comparison_text(yt.title):
                         notes = "登録チャンネルの動画更新"
-                        previous = video_post_body(old[1][3], notes, videoUrl)
-                        row = list(old[1]) + [""] * max(0, 6 - len(old[1]))
-                        row[3], row[5] = yt.title, previous
+                        previous = old[1][8] if len(old[1]) > 8 and old[1][8] else (old[1][5] if len(old[1]) > 5 else "")
+                        current_body = video_post_body(
+                            yt.title, notes, videoUrl, description, formatted_tl
+                        )
+                        row = _complete_video_row(
+                            old[1], channelName, channelUrl,
+                            datetime.dateTime2String(yt.publish_date),
+                            yt.title, videoUrl, notes, description,
+                            formatted_tl, current_body,
+                        )
                         if hasattr(sheetVideo, "update"):
-                            sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
+                            sheetVideo.update(f"A{old[0]}:I{old[0]}", [row], value_input_option="USER_ENTERED")
                         pending_posts.append({"url": videoUrl, "title": yt.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "channel_key": _boss_channel_key(yt.title, boss_names), "status": "updated", "previous_text": previous})
                     # Keep scanning known entries inside the configured period
                     # so title updates on older videos are not missed.
@@ -423,24 +520,45 @@ def checkNewArrivalsForYouTube(
                 ):
                     publishDateString = datetime.dateTime2String(publishDate)
 
-                values = [
+                notes = "登録チャンネルの新着動画"
+                description, formatted_tl, post_body = video_metadata_fields(
+                    yt.title, notes, videoUrl, description
+                )
+                if not description:
+                    print(
+                        f"skip: YouTube詳細情報不足（概要欄なし）: {videoUrl}"
+                    )
+                    continue
+                values = build_video_sheet_row(
                     channelName,
                     channelUrl,
                     datetime.dateTime2String(publishDate),
                     yt.title,
                     videoUrl,
-                ]
+                    notes,
+                    description,
+                    formatted_tl,
+                    post_body,
+                )
                 print(f"YouTube動画タイトル「{yt.title}」")
                 videoValues.append(values)
-                write_arrival("youtube-channel", yt.title, videoUrl, yt.publish_date,
-                              channel_name=channelName,
-                              details={"channel_url": channelUrl})
+                write_arrival(
+                    "youtube-channel", yt.title, videoUrl, yt.publish_date,
+                    channel_name=channelName,
+                    notes=notes,
+                    details={
+                        "channel_url": channelUrl,
+                        "動画概要欄": description,
+                        "TL整形": formatted_tl,
+                        "投稿直前本文": post_body,
+                    },
+                )
                 videoUrls.append(videoUrl)
                 known_video_urls.add(videoUrl)
 
                 count += 1
                 damage_urls.append(videoUrl)
-                pending_posts.append(build_youtube_post(videoUrl, yt.title, description, "", "登録チャンネルの新着動画", _boss_channel_key(yt.title, boss_names)))
+                pending_posts.append(build_youtube_post(videoUrl, yt.title, description, formatted_tl, notes, _boss_channel_key(yt.title, boss_names)))
 
             if (stop_channel or entry_count < DEFAULT_CHANNEL_LIMIT
                     or (page_unknown_date and str(period_mode).strip().lower()

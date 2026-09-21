@@ -1,6 +1,7 @@
 {
   "guilds": {
     "production": {
+      "name": "ねこはこたつでぐーたらする",
       "guild_id": "1336583188385890386",
       "channels": {
         "boss0_tl": "1550619283183116351",
@@ -9,21 +10,50 @@
         "boss3_tl": "1550619177281265777",
         "boss4_tl": "1550619191722119219",
         "boss5_tl": "1550619206905761882"
+      },
+      "channel_names": {
+        "boss0_tl": "0ボスtl収集🤖",
+        "boss1_tl": "1ボスtl収集🤖",
+        "boss2_tl": "2ボスtl収集🤖",
+        "boss3_tl": "3ボスtl収集🤖",
+        "boss4_tl": "4ボスtl収集🤖",
+        "boss5_tl": "5ボスtl収集🤖"
       }
     },
     "experimental": {
+      "name": "51の実験サーバー",
       "guild_id": "1360448049272328333",
       "channels": {
+        "summary": "1414080930473181254",
         "boss0_tl": "1548887801418752092",
         "boss1_tl": "1548224803465592872",
         "boss2_tl": "1548224865138376765",
         "boss3_tl": "1548224881475195024",
         "boss4_tl": "1548224897141182537",
         "boss5_tl": "1548224923191877694"
+      },
+      "channel_names": {
+        "summary": "新着tl情報",
+        "boss0_tl": "boss0_tl",
+        "boss1_tl": "boss1_tl",
+        "boss2_tl": "boss2_tl",
+        "boss3_tl": "boss3_tl",
+        "boss4_tl": "boss4_tl",
+        "boss5_tl": "boss5_tl"
       }
     }
   },
   "default_guild_key": "production",
-  "scheduled_guild_keys": ["production"],
+  "scheduled_guild_keys": [
+    "production"
+  ],
+  "summary_guild_keys": [
+    "production",
+    "experimental"
+  ],
+  "summary_channel_keys": {
+    "production": "boss0_tl",
+    "experimental": "summary"
+  },
   "test_guild_key": "experimental"
 }

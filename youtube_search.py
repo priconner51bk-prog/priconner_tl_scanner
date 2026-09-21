@@ -13,15 +13,21 @@ import gspread_utils as gspread
 import post_change_tracker as post_tracker
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
-from video_relevance import is_clan_battle_video, is_relevant_video
+from video_relevance import (
+    clan_battle_filter_reason,
+    load_content_period,
+    load_ng_terms,
+)
 from youtube_common import (
     as_utc,
     build_youtube_post,
+    build_video_sheet_row,
     is_in_youtube_period,
+    video_metadata_fields,
     video_post_body,
     write_urls_with_retry,
 )
-from youtube_storage import persist_rows
+from youtube_storage import ensure_video_headers, persist_rows
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # The collector normally enqueues Discord work; rate limiting belongs to the
@@ -256,6 +262,7 @@ def findYouTubeVideo(
     ]
 
     sheetVideo = ss.worksheet("YouTube動画")
+    ensure_video_headers(sheetVideo)
 
     sheetBossNames = ss.worksheet("ボス名")
     rows = sheetBossNames.get_all_values()
@@ -290,6 +297,13 @@ def findYouTubeVideo(
     )
     period_mode = gspread.get_config_value("youtube", "period_mode", "days")
     period_month = gspread.get_config_value("youtube", "period_month", "")
+    content_month = gspread.get_config_value("youtube", "content_month", period_month)
+    content_period_start = gspread.get_config_value("youtube", "content_period_start", "")
+    content_period_end = gspread.get_config_value("youtube", "content_period_end", "")
+    content_period_start, content_period_end = load_content_period(
+        ss, content_month, content_period_start, content_period_end
+    )
+    ng_terms = load_ng_terms(ss)
     now = _as_utc(
         now_factory() if now_factory else DateTime.now(timezone.utc)
     )
@@ -344,25 +358,62 @@ def findYouTubeVideo(
             video = enrich_video(video)
             videoUrl = video.watch_url
             description = getattr(video, "description", "")
+            rejection = clan_battle_filter_reason(
+                video,
+                boss_names=bossNames[:5],
+                ng_terms=ng_terms,
+                content_month=content_month,
+                content_period_start=content_period_start,
+                content_period_end=content_period_end,
+            )
+            if rejection:
+                print(f"skip: YouTube検索内容フィルタ ({rejection}): {video.title}")
+                continue
+            notes = "キーワード検索の新着動画"
+            description, formatted_tl, current_body = video_metadata_fields(
+                video.title, notes, videoUrl, description
+            )
+            if not description:
+                print(
+                    f"skip: YouTube詳細情報不足（概要欄なし）: {videoUrl}"
+                )
+                continue
             if videoUrl in known_video_urls:
                 old = video_rows.get(videoUrl)
+                if old and hasattr(sheetVideo, "update"):
+                    old_row = list(old[1]) + [""] * max(0, 9 - len(old[1]))
+                    merged_row = build_video_sheet_row(
+                        old_row[0], old_row[1], old_row[2], video.title,
+                        videoUrl, notes, description, formatted_tl,
+                        current_body,
+                    )
+                    if old_row[:9] != merged_row:
+                        sheetVideo.update(
+                            f"A{old[0]}:I{old[0]}",
+                            [merged_row],
+                            value_input_option="USER_ENTERED",
+                        )
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "notes": "確認用（更新）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "force_full": True})
-                if os.environ.get("PRICONNER_FORCE_NEW_POST") and old:
-                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "notes": "確認用（新規）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": "確認用（更新）", "channel_key": f"boss{boss_index}_tl", "status": "updated", "force_full": True})
+                if (os.environ.get("PRICONNER_FORCE_NEW_POST")
+                        or os.environ.get("PRICONNER_REPOST_NEW")) and old:
+                    pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": "確認用（新規）", "channel_key": f"boss{boss_index}_tl", "status": "new"})
                 if old and len(old[1]) > 3 and post_tracker.normalize_comparison_text(old[1][3]) != post_tracker.normalize_comparison_text(video.title):
                     notes = "更新"
-                    previous = video_post_body(old[1][3], notes, videoUrl)
-                    row = list(old[1]) + [""] * max(0, 6 - len(old[1]))
-                    row[3], row[5] = video.title, previous
+                    previous = old[1][8] if len(old[1]) > 8 and old[1][8] else (old[1][5] if len(old[1]) > 5 else "")
+                    current_body = video_post_body(
+                        video.title, notes, videoUrl, description, formatted_tl
+                    )
+                    row = list(old[1]) + [""] * max(0, 9 - len(old[1]))
+                    row = build_video_sheet_row(
+                        row[0], row[1], row[2], video.title, videoUrl,
+                        notes, description, formatted_tl, current_body,
+                    )
                     if hasattr(sheetVideo, "update"):
-                        sheetVideo.update(f"A{old[0]}:F{old[0]}", [row[:6]], value_input_option="USER_ENTERED")
+                        sheetVideo.update(f"A{old[0]}:I{old[0]}", [row], value_input_option="USER_ENTERED")
                     pending_posts.append({"url": videoUrl, "title": video.title, "description": description, "formatted_tl": formatted_tl, "notes": notes, "channel_key": f"boss{boss_index}_tl", "status": "updated", "previous_text": previous})
                 continue
 
-            if not is_relevant_video(video, (bossName,)):
-                print("skip: not a likely Princess Connect video")
-                continue
             # A boss-name search is authoritative here; the reference sheet
             # contains valid titles that omit explicit clan-battle markers.
 
@@ -407,19 +458,29 @@ def findYouTubeVideo(
                 channelIds.append(channelId)
 
             video_values.append(
-                [channelName, channelUrl, publishDate, videoTitle, videoUrl]
+                build_video_sheet_row(
+                    channelName, channelUrl, publishDate, videoTitle,
+                    videoUrl, notes, description, formatted_tl, current_body,
+                )
             )
-            write_arrival("youtube-search", videoTitle, videoUrl, video.publish_date,
-                          channel_name=channelName,
-                          notes="キーワード検索の新着動画",
-                          details={"channel_url": channelUrl})
+            write_arrival(
+                "youtube-search", videoTitle, videoUrl, video.publish_date,
+                channel_name=channelName,
+                notes=notes,
+                details={
+                    "channel_url": channelUrl,
+                    "動画概要欄": description,
+                    "TL整形": formatted_tl,
+                    "投稿直前本文": current_body,
+                },
+            )
             print(video_values[-1:])
             videoUrls.append(videoUrl)
             known_video_urls.add(videoUrl)
 
             count += 1
             damage_urls.append(videoUrl)
-            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, "", "キーワード検索の新着動画", f"boss{boss_index}_tl"))
+            pending_posts.append(build_youtube_post(videoUrl, videoTitle, description, formatted_tl, notes, f"boss{boss_index}_tl"))
 
     persist_rows(sheetChannel, sheetVideo, channel_values, video_values)
     channel_updates = []

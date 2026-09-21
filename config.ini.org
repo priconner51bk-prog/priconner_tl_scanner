@@ -19,6 +19,9 @@ tl_formatter_path=
 [youtube]
 period_days=1
 search_limit=20
+content_month=
+content_period_start=
+content_period_end=
 
 [monitor]
 runtime_dir=
