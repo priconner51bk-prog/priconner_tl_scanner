@@ -4,11 +4,11 @@
 
 ## 実行構成
 
-通常運用は、Windows PC `3700x` のタスクスケジューラで実行します。収集タスクとDiscord送信タスクの2つだけを登録します。
+通常運用は、Windows PC `3700x` の中央スケジューラーで実行します。中央スケジューラーが日次コントローラーと、このプロジェクトの収集ジョブを登録・有効化します。Discord送信専用タスクは登録しません。
 
 | 実行環境 | 役割 | 備考 |
 | --- | --- | --- |
-| 3700x / `www51` | 主系の定期実行 | `register_monitor_tasks.ps1` で登録。ログオン中に実行 |
+| 3700x / `www51` | 主系の定期実行 | `D:\git\priconner_clan_battle_task_scheduler\register_scheduler.ps1` で中央管理。ログオン中に実行 |
 | 手動実行 | 調査・復旧・試験 | `monitor_runner.py` または個別ステージを直接実行 |
 
 ## 最短セットアップ
@@ -18,8 +18,11 @@ python -m pip install -r requirements.txt
 Copy-Item config.ini.org config.ini
 # config.ini、.env、discord_channels.json を設定
 Set-ExecutionPolicy -Scope Process Bypass
-.\register_monitor_tasks.ps1
+Set-Location D:\git\priconner_clan_battle_task_scheduler
+.\register_scheduler.ps1
 ```
+
+このリポジトリの `register_monitor_tasks.ps1` は、中央スケジューラーへ委譲する互換ラッパーです。既存の手順を使う場合は、リポジトリ直下で `.\register_monitor_tasks.ps1` を実行できます。
 
 タスクの詳細、Discord投稿、障害時の確認方法は [OPERATIONS.md](OPERATIONS.md) を参照してください。
 
@@ -29,7 +32,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 1. 各ステージがYouTube、WorryChefs、またはDiscordチャンネルを走査する。
 2. 検出結果をGoogle Sheetsへ保存し、投稿対象をDiscordキューへ登録する。
-3. `discord_queue.py` の専用タスクが1分ごとにSQLiteキューを送信する。ステージ終了後の送信は補助的に実行する。
+3. 各収集ステージの終了後に `monitor_runner.py` がSQLiteキューを送信する。Discord送信専用の常駐・1分間隔タスクは登録しない。
 4. Discordの送信先は `discord_channels.json` の通常運用設定に従う。
 
 同一処理の重複起動はロックで抑止し、Discord投稿は送信先ごとの順序、重複排除、429・通信失敗時の再試行、添付画像を保持します。
@@ -74,8 +77,8 @@ python monitor_runner.py --stages youtube-channel
 ## 関連ファイル
 
 - `monitor_runner.py`: ステージ実行とDiscordキュー送信
-- `scheduler_bootstrap.ps1`: 当日分のWindowsタスク登録
-- `register_monitor_tasks.ps1`: 3700xのタスクスケジューラ登録
+- `scheduler_bootstrap.ps1`: 中央スケジューラーへの委譲用互換スクリプト
+- `register_monitor_tasks.ps1`: 中央スケジューラーへの委譲用互換スクリプト
 - `discord_queue.py`: Discord投稿キューの送信・再試行
 - `OPERATIONS.md`: 運用手順とトラブルシュート
 - `SECRET_INVENTORY.local.md`: 秘密情報の対応表
