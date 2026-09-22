@@ -13,6 +13,8 @@ from pathlib import Path
 import discord_queue
 from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 
+WINDOWLESS_SUBPROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_STAGES = ("youtube-channel", "youtube-search", "worrychefs", "discord-channel")
 STAGE_SCRIPTS = {
@@ -91,15 +93,27 @@ def run_stages(
         exit_code=None,
     )
 
+    queue_path = (
+        Path(queue_path).expanduser().resolve()
+        if queue_path is not None
+        else runtime_dir / "discord_queue.sqlite3"
+    )
+
     for stage in stages:
         store.update(status="running", stage=stage, failure_stage=None)
         command = [python_executable, str(Path(root_dir) / STAGE_SCRIPTS[stage])]
         try:
             child_environment = os.environ.copy()
             child_environment["PRICONNER_MONITOR_RUNTIME_DIR"] = str(runtime_dir)
-            result = command_runner(
-                command, cwd=root_dir, check=False, env=child_environment
-            )
+            child_environment["PRICONNER_DISCORD_QUEUE_DB"] = str(queue_path)
+            command_options = {
+                "cwd": root_dir,
+                "check": False,
+                "env": child_environment,
+            }
+            if command_runner is subprocess.run:
+                command_options["creationflags"] = WINDOWLESS_SUBPROCESS_FLAGS
+            result = command_runner(command, **command_options)
             exit_code = result.returncode
         except OSError:
             exit_code = 127
@@ -113,7 +127,6 @@ def run_stages(
             )
             return exit_code
 
-    queue_path = Path(queue_path) if queue_path is not None else runtime_dir / "discord_queue.sqlite3"
     try:
         queue_result = discord_queue.drain(path=queue_path)
     except Exception as error:  # noqa: BLE001 - keep queue failures in monitor state
@@ -158,6 +171,10 @@ def main(argv=None):
         "--stages",
         default=None,
     )
+    parser.add_argument("--period-month", default=None,
+                        help="試験用のYouTube公開対象月 (YYYY-MM)")
+    parser.add_argument("--content-month", default=None,
+                        help="試験用のクラバト内容月 (YYYY-MM)")
     args = parser.parse_args(argv)
     runtime_dir = args.runtime_dir
     if runtime_dir is None:
@@ -180,6 +197,18 @@ def main(argv=None):
         queue_path = common_runtime_dir / "discord_queue.sqlite3"
         lock_name = "monitor_runner-" + "-".join(stages) + ".lock"
         with acquire_lock(state_runtime_dir / lock_name):
+            legacy_queue_path = state_runtime_dir / "discord_queue.sqlite3"
+            if legacy_queue_path != queue_path:
+                migrated = discord_queue.migrate_queue(legacy_queue_path, queue_path)
+                if migrated["migrated"]:
+                    print(
+                        "Discordキュー移行: "
+                        f"{migrated['migrated']}件を共通DBへ移行"
+                    )
+            if args.period_month:
+                os.environ["PRICONNER_YOUTUBE_PERIOD_MONTH"] = args.period_month
+            if args.content_month:
+                os.environ["PRICONNER_YOUTUBE_CONTENT_MONTH"] = args.content_month
             return run_stages(stages, state_runtime_dir, queue_path=queue_path)
     except LockBusy:
         print("Another monitor run is already in progress; skipping.")

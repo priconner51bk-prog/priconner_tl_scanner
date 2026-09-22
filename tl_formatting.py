@@ -12,6 +12,8 @@ from pathlib import Path
 
 import gspread_utils as config
 
+WINDOWLESS_SUBPROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 _TIME_LINE = re.compile(
     r"^\s*(?:[⭐️⭐︎⭐★☆🔺△#◆◇■□\\\-]|\[[54321-]+\])*"
     r"\d{1,2}:\d{1,2}(?:\s*[-~]\s*\d{1,2}(?::\d{1,2})?)?(?=\D|$)"
@@ -139,6 +141,7 @@ def _run_git(path, *arguments):
             text=True,
             timeout=60,
             check=True,
+            creationflags=WINDOWLESS_SUBPROCESS_FLAGS,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         detail = getattr(error, "stderr", "") or str(error)
