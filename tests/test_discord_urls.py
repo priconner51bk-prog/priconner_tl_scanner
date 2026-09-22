@@ -3,6 +3,10 @@
 import discord_channel
 
 
+def test_source_channel_label_prefers_human_name():
+    assert discord_channel._source_channel_label("888415796617965618") == "四段セミオ_②"
+
+
 def test_normalize_youtube_url_short():
     assert (
         discord_channel._normalize_youtube_url("https://youtu.be/abc123")

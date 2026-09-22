@@ -11,6 +11,7 @@ import gspread_utils
 DEFAULT_TIMEOUT = 10
 DEFAULT_RETRIES = 2
 DEFAULT_API_INTERVAL = 1.0
+SUMMARY_MENTION_USER_ID = "1276185515799871595"
 
 
 def _integer_config(section, key, fallback, minimum=0):
@@ -146,7 +147,14 @@ def channel_id(guild_key, channel_key):
     return channel
 
 
-def _send(content, label, guild_key="default", channel_key="boss0_tl", files=None):
+def _send(
+    content,
+    label,
+    guild_key="default",
+    channel_key="boss0_tl",
+    files=None,
+    allowed_user_ids=None,
+):
     timeout = _integer_config("discord", "timeout", DEFAULT_TIMEOUT, minimum=1)
     retries = _integer_config("discord", "retries", DEFAULT_RETRIES)
     for attempt in range(retries + 1):
@@ -155,6 +163,10 @@ def _send(content, label, guild_key="default", channel_key="boss0_tl", files=Non
                 "content": content,
                 "allowed_mentions": {"parse": []},
             }
+            if allowed_user_ids:
+                payload["allowed_mentions"]["users"] = [
+                    str(user_id) for user_id in allowed_user_ids
+                ]
             request_kwargs = {"timeout": timeout}
             if files:
                 request_kwargs.update(
@@ -195,7 +207,17 @@ def _send(content, label, guild_key="default", channel_key="boss0_tl", files=Non
 
 
 def notify(text, guild_key="default", channel_key="boss0_tl"):
-    return _send(f"@here\n{text}", "通知送信成功", guild_key, channel_key)
+    return _send(text, "通知送信成功", guild_key, channel_key)
+
+
+def notify_summary(text, guild_key="default", channel_key="boss0_tl"):
+    return _send(
+        f"<@{SUMMARY_MENTION_USER_ID}>\n{text}",
+        "サマリー通知送信成功",
+        guild_key,
+        channel_key,
+        allowed_user_ids=[SUMMARY_MENTION_USER_ID],
+    )
 
 
 def post(text, guild_key="default", channel_key="boss0_tl", files=None):
@@ -203,7 +225,12 @@ def post(text, guild_key="default", channel_key="boss0_tl", files=None):
 
 
 def post_to_configured_guilds(
-    text, channel_key="boss0_tl", files=None, guild_keys=None, dedupe_key=None
+    text,
+    channel_key="boss0_tl",
+    files=None,
+    guild_keys=None,
+    dedupe_key=None,
+    summary_author=None,
 ):
     from discord_queue import enqueue_for_guilds
 
@@ -214,32 +241,42 @@ def post_to_configured_guilds(
         kind="post",
         files=files,
         dedupe_key=dedupe_key,
+        summary_author=summary_author,
     )
 
 
-def notify_to_configured_guilds(text, channel_key="boss0_tl", guild_keys=None):
+def notify_to_configured_guilds(
+    text, channel_key="boss0_tl", guild_keys=None, path=None, kind="notify"
+):
     from discord_queue import enqueue_for_guilds
 
     return enqueue_for_guilds(
         text,
         channel_key=channel_key,
         guild_keys=guild_keys if guild_keys is not None else configured_guild_keys(),
-        kind="notify",
+        kind=kind,
         dedupe_key=None,
+        path=path,
     )
 
 
-def notify_summary_to_configured_guilds(text, guild_keys=None):
+def notify_summary_to_configured_guilds(text, guild_keys=None, path=None):
     """Queue a summary using each guild's configured summary channel."""
     if guild_keys is None:
         guild_keys = configured_summary_guild_keys()
     queued = []
     for guild_key in guild_keys:
+        channel_key = summary_channel_key(guild_key)
+        if channel_key == "boss0_tl":
+            print(f"skip: Discordサマリー送信先が0ボスのため除外: guild={guild_key}")
+            continue
         queued.extend(
             notify_to_configured_guilds(
                 text,
-                channel_key=summary_channel_key(guild_key),
+                channel_key=channel_key,
                 guild_keys=[guild_key],
+                path=path,
+                kind="summary",
             )
         )
     return queued

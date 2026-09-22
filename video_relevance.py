@@ -2,7 +2,6 @@
 
 import re
 import unicodedata
-from datetime import datetime as DateTime, timezone
 
 MAX_DESCRIPTION_LENGTH = 5000
 POSITIVE_GAME_TERMS = ("プリコネ", "プリンセスコネクト", "priconne")
@@ -115,22 +114,6 @@ def load_ng_terms(spreadsheet=None):
     return tuple(dict.fromkeys((*DEFAULT_NG_TERMS, *terms)))
 
 
-def load_content_period(spreadsheet, content_month, fallback_start="", fallback_end=""):
-    """Load the active battle period for the configured content month."""
-    try:
-        rows = spreadsheet.worksheet("クラバト期間").get_all_values()
-    except Exception as error:  # noqa: BLE001 - config fallback is intentional
-        print(f"警告: クラバト期間シートを読めないため設定値を使用: {error}")
-        return fallback_start, fallback_end
-    for row in rows[1:]:
-        if len(row) < 6 or str(row[0]).strip() != str(content_month).strip():
-            continue
-        if str(row[5] or "TRUE").strip().lower() in {"0", "false", "no", "無効", "off"}:
-            continue
-        return str(row[1]).strip(), str(row[2]).strip()
-    return fallback_start, fallback_end
-
-
 def _video_text(video):
     def field(name, default=""):
         if isinstance(video, dict):
@@ -154,59 +137,11 @@ def _has_content_month_conflict(title, content_month):
     return bool(match and int(match.group("month")) != target_month)
 
 
-def _parse_datetime(value):
-    if not value:
-        return None
-    if isinstance(value, DateTime):
-        parsed = value
-    else:
-        try:
-            parsed = DateTime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except (TypeError, ValueError):
-            return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _video_field(video, name, default=None):
-    if isinstance(video, dict):
-        return video.get(name, default)
-    return getattr(video, name, default)
-
-
-def _has_content_period_conflict(video, content_period_start, content_period_end):
-    published = _parse_datetime(_video_field(video, "publish_date"))
-    start = _parse_datetime(content_period_start)
-    end = _parse_datetime(content_period_end)
-    if not start and not end:
-        return False
-    if published is None:
-        return True
-    if start and published < start:
-        return True
-    if end and published >= end:
-        return True
-    return False
-
-
-def is_in_content_period(value, content_period_start, content_period_end):
-    """Return whether a timestamp is inside the configured half-open period."""
-    parsed = _parse_datetime(value)
-    start = _parse_datetime(content_period_start)
-    end = _parse_datetime(content_period_end)
-    if parsed is None or (not start and not end):
-        return False
-    return (not start or parsed >= start) and (not end or parsed < end)
-
-
 def clan_battle_filter_reason(
     video,
     boss_names=(),
     ng_terms=(),
     content_month="",
-    content_period_start="",
-    content_period_end="",
 ):
     """Return a rejection reason, or an empty string when the video is allowed."""
     title, combined = _video_text(video)
@@ -214,10 +149,6 @@ def clan_battle_filter_reason(
     hit = next((term for term in normalized_ng if term in combined), "")
     if hit:
         return f"NGワード: {hit}"
-    if _has_content_period_conflict(
-        video, content_period_start, content_period_end
-    ):
-        return "クラバト本戦期間外または公開日時不明"
     if _has_content_month_conflict(title, content_month):
         return "クラバト内容月が対象月外"
     if (
@@ -238,16 +169,12 @@ def is_allowed_clan_battle_video(
     boss_names=(),
     ng_terms=(),
     content_month="",
-    content_period_start="",
-    content_period_end="",
 ):
     return not clan_battle_filter_reason(
         video,
         boss_names,
         ng_terms,
         content_month,
-        content_period_start,
-        content_period_end,
     )
 
 

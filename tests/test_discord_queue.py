@@ -74,6 +74,34 @@ def test_queue_persists_attachment_bytes(tmp_path, monkeypatch):
     ]
 
 
+def test_queued_post_items_filters_by_run_and_excludes_notifications(tmp_path):
+    db_path = Path(tmp_path) / "queue.sqlite3"
+    discord_queue.enqueue_for_guilds(
+        "old", channel_key="boss1_tl", guild_keys=["production"], path=db_path
+    )
+    with closing(discord_queue._connect(db_path)) as connection:
+        start = connection.execute(
+            "SELECT MAX(created_at) + 0.001 AS value FROM discord_queue"
+        ).fetchone()["value"]
+    discord_queue.enqueue_for_guilds(
+        "post",
+        channel_key="boss2_tl",
+        guild_keys=["production"],
+        summary_author="YouTubeチャンネル",
+        path=db_path,
+    )
+    discord_queue.enqueue_for_guilds(
+        "notify", channel_key="summary", guild_keys=["production"],
+        kind="notify", path=db_path,
+    )
+
+    items = discord_queue.queued_post_items(path=db_path, created_after=start)
+
+    assert [item["content"] for item in items] == ["post"]
+    assert items[0]["channel_key"] == "boss2_tl"
+    assert items[0]["summary_author"] == "YouTubeチャンネル"
+
+
 def test_drain_cleans_old_history_but_keeps_active_items(tmp_path, monkeypatch):
     monkeypatch.setattr(discord_utils, "post", lambda **_kwargs: object())
     db_path = Path(tmp_path) / "queue.sqlite3"
@@ -131,3 +159,31 @@ def test_drain_cleans_old_history_but_keeps_active_items(tmp_path, monkeypatch):
             "SELECT dedupe_key FROM discord_queue ORDER BY dedupe_key"
         ).fetchall()
     assert [row["dedupe_key"] for row in rows] == ["active-sent"]
+
+
+def test_migrate_queue_preserves_rows_and_attachments(tmp_path):
+    source = Path(tmp_path) / "stage" / "discord_queue.sqlite3"
+    destination = Path(tmp_path) / "discord_queue.sqlite3"
+    discord_queue.enqueue_for_guilds(
+        "pending post",
+        channel_key="boss3_tl",
+        guild_keys=["production"],
+        files={"file": ("formation.png", b"png-bytes", "image/png")},
+        path=source,
+    )
+
+    assert discord_queue.migrate_queue(source, destination) == {
+        "migrated": 1,
+        "remaining": 0,
+    }
+    with closing(discord_queue._connect(destination)) as connection:
+        row = connection.execute(
+            "SELECT content, status, attachment_name, attachment_mime, attachment_blob "
+            "FROM discord_queue"
+        ).fetchone()
+    assert tuple(row) == ("pending post", "queued", "formation.png", "image/png", b"png-bytes")
+    assert discord_queue.pending_count(source) == 0
+    assert discord_queue.migrate_queue(source, destination) == {
+        "migrated": 0,
+        "remaining": 0,
+    }

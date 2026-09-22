@@ -8,6 +8,11 @@ _ZERO_WIDTH_CHARS = re.compile(r"[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u18
 _DISCORD_MARKDOWN_SPECIALS = re.compile(r"([\\`*_~|{}\[\]()<>#])")
 _DISCORD_URL = re.compile(r"(?<!<)(https?://[^\s<>\\\[\]()]+)")
 _UB_ARROW = re.compile(r"\bUB\s*>\s*", re.IGNORECASE)
+_DISCORD_DETECTION_NOTE = "Discordメッセージから検出"
+_DISCORD_DETECTION_NOTE_LINE = re.compile(
+    r"^\s*(?:[-+*]\s+)?(?:\*\*)?備考\s*[:：]\s*(?:\*\*)?\s*"
+    r"Discordメッセージから検出\s*$"
+)
 _DETECTION_TIMESTAMP_LINE = re.compile(
     r"(?m)^[ \t]*(?:[-+]\s+)?検出日時:[^\r\n]*(?:\r?\n|$)"
 )
@@ -55,12 +60,23 @@ def normalize_comparison_text(text):
     """Normalize text used to decide whether a post materially changed."""
     normalized = unicodedata.normalize("NFKC", str(text or ""))
     normalized = _ZERO_WIDTH_CHARS.sub("", normalized)
+    if _DISCORD_DETECTION_NOTE_LINE.fullmatch(normalized):
+        normalized = f"備考: {_DISCORD_DETECTION_NOTE}"
     return " ".join(normalized.split()).strip()
 
 
 def normalize_lines(text):
     return [normalize_comparison_text(line) for line in str(text or "").splitlines()
             if line.strip()]
+
+
+def remove_discord_detection_note(text):
+    """Remove the generated detection note when it is repeated in source text."""
+    lines = [
+        line for line in str(text or "").splitlines()
+        if not _DISCORD_DETECTION_NOTE_LINE.fullmatch(line)
+    ]
+    return "\n".join(lines).strip()
 
 
 def changed_lines(previous, current):

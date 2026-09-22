@@ -6,6 +6,25 @@ def test_normalize_comparison_text_ignores_unicode_and_zero_width_variants():
     assert post_change_tracker.normalize_comparison_text("同じタイトル") == "同じタイトル"
 
 
+def test_normalize_comparison_text_treats_detection_note_markup_as_equivalent():
+    assert post_change_tracker.normalize_comparison_text(
+        "**備考:** Discordメッセージから検出"
+    ) == post_change_tracker.normalize_comparison_text(
+        "備考： Discordメッセージから検出"
+    )
+
+
+def test_changed_lines_ignores_detection_note_format_only_change():
+    previous = "**備考:** Discordメッセージから検出"
+    current = "- 備考: Discordメッセージから検出"
+    assert post_change_tracker.changed_lines(previous, current) == ""
+
+
+def test_remove_discord_detection_note_removes_repeated_source_note():
+    source = "本文\n- **備考:** Discordメッセージから検出\nURL"
+    assert post_change_tracker.remove_discord_detection_note(source) == "本文\nURL"
+
+
 def test_changed_lines_does_not_report_equivalent_lines():
     previous = "動画タイトル: ＡＢ\u200b  C\n備考: 更新\n動画URL: https://example.test"
     current = "動画タイトル: AB C\n備考: 更新\n動画URL: https://example.test"

@@ -81,7 +81,22 @@ def _next_month(year, month):
     return year, month + 1
 
 
-def youtube_period_bounds(now, period_days, period_mode="days", period_month=""):
+def current_month_key(now):
+    """Return the JST calendar month for a timestamp as YYYY-MM."""
+    local_now = as_utc(now).astimezone(datetime.JST)
+    return f"{local_now.year:04d}-{local_now.month:02d}"
+
+
+def effective_content_month(content_month, period_month, now):
+    """Resolve an optional content month, defaulting to the JST current month."""
+    return (
+        str(content_month or "").strip()
+        or str(period_month or "").strip()
+        or current_month_key(now)
+    )
+
+
+def youtube_period_bounds(now, period_days, period_mode="current_month", period_month=""):
     """Return the UTC half-open bounds for the configured collection period."""
     now = as_utc(now)
     override_start = os.environ.get("PRICONNER_YOUTUBE_PERIOD_START", "").strip()
@@ -116,13 +131,13 @@ def youtube_period_bounds(now, period_days, period_mode="days", period_month="")
     return now - timedelta(days=period_days), None
 
 
-def youtube_cutoff(now, period_days, period_mode="days", period_month=""):
+def youtube_cutoff(now, period_days, period_mode="current_month", period_month=""):
     """Return the UTC lower bound for the configured YouTube collection period."""
     return youtube_period_bounds(now, period_days, period_mode, period_month)[0]
 
 
 def is_in_youtube_period(
-    publish_date, now, period_days, period_mode="days", period_month=""
+    publish_date, now, period_days, period_mode="current_month", period_month=""
 ):
     """Return whether a known YouTube publication date is in scope."""
     if publish_date is None:

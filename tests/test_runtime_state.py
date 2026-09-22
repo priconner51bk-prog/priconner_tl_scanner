@@ -85,6 +85,102 @@ def test_monitor_runner_main_returns_zero_on_success():
     run_stages.assert_called_once()
 
 
+def test_monitor_runner_month_options_set_trial_environment():
+    with tempfile.TemporaryDirectory() as directory, patch.object(
+        monitor_runner, "run_stages", return_value=0
+    ), patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("PRICONNER_YOUTUBE_PERIOD_MONTH", None)
+        os.environ.pop("PRICONNER_YOUTUBE_CONTENT_MONTH", None)
+        result = monitor_runner.main([
+            "--runtime-dir", directory,
+            "--stages", "youtube-search",
+            "--period-month", "2026-08",
+            "--content-month", "2026-08",
+        ])
+        assert result == 0
+        assert os.environ["PRICONNER_YOUTUBE_PERIOD_MONTH"] == "2026-08"
+        assert os.environ["PRICONNER_YOUTUBE_CONTENT_MONTH"] == "2026-08"
+
+
+def test_run_stages_passes_shared_queue_path_to_children(tmp_path):
+    calls = []
+
+    def command_runner(command, cwd=None, check=False, env=None):
+        calls.append(env)
+        return SimpleNamespace(returncode=0)
+
+    queue_path = Path(tmp_path) / "discord_queue.sqlite3"
+    with patch.object(
+        monitor_runner.discord_queue,
+        "drain",
+        return_value={
+            "sent": 0,
+            "retried": 0,
+            "failed": 0,
+            "remaining": 0,
+        },
+    ):
+        assert monitor_runner.run_stages(
+            ("discord-channel",),
+            Path(tmp_path) / "discord-channel",
+            command_runner=command_runner,
+            root_dir=Path.cwd(),
+            queue_path=queue_path,
+            shared_runtime_dir=Path(tmp_path),
+        ) == 0
+
+    assert calls[0]["PRICONNER_DISCORD_QUEUE_DB"] == str(queue_path.resolve())
+    assert calls[0]["PRICONNER_YOUTUBE_HANDOFF_PATH"] == str(
+        (Path(tmp_path) / "youtube_url_handoff.json").resolve()
+    )
+
+
+def test_queue_summary_is_created_before_drain(tmp_path, monkeypatch):
+    events = []
+    queued_posts = [
+        {
+            "channel_key": "boss1_tl",
+            "content": "動画タイトル: 検索TL\n動画URL: https://youtu.be/search",
+        },
+        {
+            "channel_key": "boss1_tl",
+            "content": "動画タイトル: 検索TL\n動画URL: https://youtu.be/search",
+        },
+    ]
+    monkeypatch.setattr(
+        monitor_runner.discord_queue,
+        "queued_post_items",
+        lambda **_kwargs: queued_posts,
+    )
+    monkeypatch.setattr(
+        monitor_runner.discord_queue,
+        "drain",
+        lambda **_kwargs: events.append("drain") or {
+            "sent": 0, "retried": 0, "failed": 0, "remaining": 0,
+        },
+    )
+    import discord_utils
+
+    monkeypatch.setattr(
+        discord_utils,
+        "notify_summary_to_configured_guilds",
+        lambda content, **_kwargs: events.append(content),
+    )
+
+    result = monitor_runner.run_stages(
+        ("youtube-search",),
+        tmp_path,
+        command_runner=lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
+        root_dir=Path.cwd(),
+        queue_path=tmp_path / "queue.sqlite3",
+    )
+
+    assert result == 0
+    assert len(events) == 2
+    assert "ボス1: 1件" in events[0]
+    assert events[1] == "drain"
+
+
 def test_monitor_runner_main_skips_when_lock_busy():
     with tempfile.TemporaryDirectory() as directory, patch.object(
         monitor_runner, "acquire_lock", side_effect=runtime_utils.LockBusy()
@@ -101,4 +197,3 @@ def test_monitor_runner_main_returns_two_for_unknown_stage():
             ["--runtime-dir", directory, "--stages", "bogus"]
         )
     assert result == 2
-

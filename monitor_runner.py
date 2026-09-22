@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,42 @@ STAGE_SCRIPTS = {
     "worrychefs": "worrychefs.py",
     "discord-channel": "discord_channel.py",
 }
+
+
+def _unique_queued_posts(items):
+    """Collapse one logical post duplicated for multiple destination guilds."""
+    unique = []
+    seen = set()
+    for item in items:
+        key = (item.get("channel_key", ""), item.get("content", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _queue_post_summary(queue_path, created_after):
+    """Summarize this run's queued posts before the queue is drained."""
+    queued_posts = discord_queue.queued_post_items(
+        path=queue_path,
+        created_after=created_after,
+    )
+    posts = _unique_queued_posts(queued_posts)
+    if not posts:
+        return False
+
+    # Keep the existing summary formatter as the single source of formatting
+    # rules; queue rows already contain the exact text about to be sent.
+    import discord_utils
+    from discord_channel import _build_post_summary
+
+    discord_utils.notify_summary_to_configured_guilds(
+        _build_post_summary(posts),
+        path=queue_path,
+    )
+    print(f"Discord投稿サマリーを作成: 対象{len(posts)}件")
+    return True
 
 
 def _monitor_config_value(key, fallback=None):
@@ -80,8 +117,10 @@ def run_stages(
     root_dir=ROOT_DIR,
     clock=None,
     queue_path=None,
+    shared_runtime_dir=None,
 ):
     runtime_dir = Path(runtime_dir).expanduser().resolve()
+    shared_runtime_dir = Path(shared_runtime_dir or runtime_dir).expanduser().resolve()
     store = StateStore(runtime_dir / "state.json", clock=clock)
     started_at = (clock or (lambda: datetime.now(timezone.utc)))().isoformat()
     store.update(
@@ -98,6 +137,7 @@ def run_stages(
         if queue_path is not None
         else runtime_dir / "discord_queue.sqlite3"
     )
+    run_started_at = time.time()
 
     for stage in stages:
         store.update(status="running", stage=stage, failure_stage=None)
@@ -106,6 +146,9 @@ def run_stages(
             child_environment = os.environ.copy()
             child_environment["PRICONNER_MONITOR_RUNTIME_DIR"] = str(runtime_dir)
             child_environment["PRICONNER_DISCORD_QUEUE_DB"] = str(queue_path)
+            child_environment["PRICONNER_YOUTUBE_HANDOFF_PATH"] = str(
+                shared_runtime_dir / "youtube_url_handoff.json"
+            )
             command_options = {
                 "cwd": root_dir,
                 "check": False,
@@ -126,6 +169,19 @@ def run_stages(
                 exit_code=exit_code,
             )
             return exit_code
+
+    try:
+        _queue_post_summary(queue_path, run_started_at)
+    except Exception as error:  # noqa: BLE001 - summary failure is a run failure
+        print(f"Discord投稿サマリー作成に失敗: {error}", file=sys.stderr)
+        store.update(
+            status="failed",
+            stage="discord-summary",
+            failure_stage="discord-summary",
+            finished_at=store.clock().isoformat(),
+            exit_code=1,
+        )
+        return 1
 
     try:
         queue_result = discord_queue.drain(path=queue_path)
@@ -209,7 +265,12 @@ def main(argv=None):
                 os.environ["PRICONNER_YOUTUBE_PERIOD_MONTH"] = args.period_month
             if args.content_month:
                 os.environ["PRICONNER_YOUTUBE_CONTENT_MONTH"] = args.content_month
-            return run_stages(stages, state_runtime_dir, queue_path=queue_path)
+            return run_stages(
+                stages,
+                state_runtime_dir,
+                queue_path=queue_path,
+                shared_runtime_dir=common_runtime_dir,
+            )
     except LockBusy:
         print("Another monitor run is already in progress; skipping.")
         return 0

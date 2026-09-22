@@ -56,12 +56,18 @@ python monitor_runner.py --stages youtube-channel
 
 監視期間を無視して全ステージを試験する場合は、外部サービスへアクセスして投稿する可能性があるため、実行前に対象を確認してください。
 
+固定月を使う試験例:
+
+```sh
+python monitor_runner.py --stages youtube-search --period-month 2026-08 --content-month 2026-08
+```
+
 ## 主要な設定
 
 - `config.ini.org` を `config.ini` にコピーして、Google Sheets・Discord・監視期間を設定する。
 - `config.ini`、`.env`、認証JSON、`discord_channels.json`、実行状態はGit管理外に置く。
-- YouTubeの期間は `[youtube] period_mode=current_month` を基本とする。固定月試験は `target_month`、日数指定は `days` を使用する。
-- YouTubeの内容月・クラバト（トレーニングを含む）期間は `[youtube] content_month` と `content_period_start/end` で指定し、対象外期間の動画、対象外月のクラバト表記、他ゲーム、SP・イベント動画は取得しない。追加の除外語は新着スプレッドシートの `NGワード` シートで管理する。
+- YouTubeの公開対象月は、通常はJSTの当月を自動使用する。試験時だけ `--period-month YYYY-MM` と `--content-month YYYY-MM` で対象月を指定できる。
+- YouTubeは当月の公開日時と内容月を基準にし、対象外月のクラバト表記、他ゲーム、SP・イベント動画は取得しない。追加の除外語は「プリコネTL新着」の `NGワード` シートで管理する。
 - `PRICONNER_YOUTUBE_BOSS_INDEX=1`〜`5` で検索対象ボスを限定できる。チャンネル監視を併用する場合は `PRICONNER_ALLOW_SHARED_CHANNEL_SCAN=1` が必要。
 - Discord投稿の送信にはBotトークン、Discordチャンネルの読み取りには `[discord_channel] token` または `DISCORD_TOKEN` を使用する。
 - TLフォーマッタは任意依存です。利用できない場合も走査・URL投稿は継続しますが、TL本文の自動整形は省略されます。
@@ -77,7 +83,6 @@ python monitor_runner.py --stages youtube-channel
 ## 関連ファイル
 
 - `monitor_runner.py`: ステージ実行とDiscordキュー送信
-- `scheduler_bootstrap.ps1`: 中央スケジューラーへの委譲用互換スクリプト
 - `register_monitor_tasks.ps1`: 中央スケジューラーへの委譲用互換スクリプト
 - `discord_queue.py`: Discord投稿キューの送信・再試行
 - `OPERATIONS.md`: 運用手順とトラブルシュート

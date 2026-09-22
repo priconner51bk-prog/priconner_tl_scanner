@@ -6,7 +6,7 @@ import hashlib
 import os
 import sqlite3
 import time
-from contextlib import closing
+from contextlib import ExitStack, closing
 from pathlib import Path
 
 from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
@@ -18,6 +18,23 @@ DEFAULT_BATCH_SIZE = 100
 RETRY_BASE_SECONDS = 30
 SENT_RETENTION_DAYS = 180
 FAILED_RETENTION_DAYS = 365
+QUEUE_COLUMNS = (
+    "dedupe_key",
+    "guild_key",
+    "channel_key",
+    "kind",
+    "content",
+    "summary_author",
+    "status",
+    "attempts",
+    "available_at",
+    "created_at",
+    "sent_at",
+    "last_error",
+    "attachment_name",
+    "attachment_mime",
+    "attachment_blob",
+)
 
 
 def queue_path(path=None):
@@ -45,6 +62,7 @@ def _connect(path):
             channel_key TEXT NOT NULL,
             kind TEXT NOT NULL DEFAULT 'post',
             content TEXT NOT NULL,
+            summary_author TEXT,
             status TEXT NOT NULL DEFAULT 'queued',
             attempts INTEGER NOT NULL DEFAULT 0,
             available_at REAL NOT NULL,
@@ -68,6 +86,7 @@ def _connect(path):
         ("attachment_name", "TEXT"),
         ("attachment_mime", "TEXT"),
         ("attachment_blob", "BLOB"),
+        ("summary_author", "TEXT"),
     ):
         if name not in columns:
             connection.execute(
@@ -90,10 +109,11 @@ def enqueue_for_guilds(
     dedupe_key=None,
     files=None,
     path=None,
+    summary_author=None,
 ):
     """Append one logical message for each fixed destination guild."""
     content = str(content or "")
-    if not content or kind not in {"post", "notify"}:
+    if not content or kind not in {"post", "notify", "summary"}:
         return []
 
     attachment_name = attachment_mime = None
@@ -121,10 +141,10 @@ def enqueue_for_guilds(
             cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO discord_queue
-                    (dedupe_key, guild_key, channel_key, kind, content,
+                    (dedupe_key, guild_key, channel_key, kind, content, summary_author,
                      available_at, created_at, attachment_name, attachment_mime,
                      attachment_blob)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     key,
@@ -132,6 +152,7 @@ def enqueue_for_guilds(
                     channel_key,
                     kind,
                     content,
+                    str(summary_author or ""),
                     now,
                     now,
                     attachment_name,
@@ -145,12 +166,87 @@ def enqueue_for_guilds(
     return inserted
 
 
+def queued_post_items(path=None, created_after=None):
+    """Return queued post payloads for a pre-send aggregate summary."""
+    path = queue_path(path)
+    with closing(_connect(path)) as connection:
+        query = [
+            "SELECT dedupe_key, guild_key, channel_key, content, summary_author, created_at",
+            "FROM discord_queue",
+            "WHERE status = 'queued' AND kind = 'post'",
+        ]
+        parameters = []
+        if created_after is not None:
+            query.append("AND created_at >= ?")
+            parameters.append(float(created_after))
+        query.append("ORDER BY created_at, id")
+        rows = connection.execute(" ".join(query), parameters).fetchall()
+    return [dict(row) for row in rows]
+
+
 def pending_count(path=None):
     with closing(_connect(path)) as connection:
         row = connection.execute(
             "SELECT COUNT(*) AS count FROM discord_queue WHERE status = 'queued'"
         ).fetchone()
     return int(row["count"])
+
+
+def migrate_queue(source_path, destination_path):
+    """Move every queued-db row to the shared queue without losing payloads.
+
+    The copy is committed before source rows are deleted.  If a dedupe key
+    already exists with different data, migration stops and leaves the source
+    intact instead of silently discarding a possible post.
+    """
+    source = Path(source_path).expanduser().resolve()
+    destination = Path(destination_path).expanduser().resolve()
+    if source == destination or not source.exists():
+        return {"migrated": 0, "remaining": 0}
+
+    lock_paths = sorted(
+        {source.with_name(QUEUE_LOCK_NAME), destination.with_name(QUEUE_LOCK_NAME)},
+        key=lambda path: str(path).casefold(),
+    )
+    with ExitStack() as locks:
+        for lock_path in lock_paths:
+            locks.enter_context(acquire_lock(lock_path))
+        with closing(_connect(source)) as source_connection, closing(
+            _connect(destination)
+        ) as destination_connection:
+            rows = source_connection.execute(
+                "SELECT " + ", ".join(QUEUE_COLUMNS) + " FROM discord_queue ORDER BY id"
+            ).fetchall()
+            if not rows:
+                return {"migrated": 0, "remaining": 0}
+
+            placeholders = ", ".join("?" for _ in QUEUE_COLUMNS)
+            destination_connection.executemany(
+                "INSERT OR IGNORE INTO discord_queue ("
+                + ", ".join(QUEUE_COLUMNS)
+                + ") VALUES ("
+                + placeholders
+                + ")",
+                [tuple(row[column] for column in QUEUE_COLUMNS) for row in rows],
+            )
+            destination_connection.commit()
+
+            for row in rows:
+                copied = destination_connection.execute(
+                    "SELECT " + ", ".join(QUEUE_COLUMNS)
+                    + " FROM discord_queue WHERE dedupe_key = ?",
+                    (row["dedupe_key"],),
+                ).fetchone()
+                expected = tuple(row[column] for column in QUEUE_COLUMNS)
+                if copied is None or tuple(copied[column] for column in QUEUE_COLUMNS) != expected:
+                    raise RuntimeError(
+                        "Discordキュー移行中に重複キーまたは内容不一致を検出: "
+                        f"{row['dedupe_key']}"
+                    )
+
+            source_connection.execute("DELETE FROM discord_queue")
+            source_connection.commit()
+            return {"migrated": len(rows), "remaining": 0}
 
 
 def _reset_stale_sending(connection, now):
@@ -221,7 +317,12 @@ def _send(item):
     # Import lazily to keep enqueue-only collectors free of API initialization.
     import discord_utils
 
-    sender = discord_utils.notify if item["kind"] == "notify" else discord_utils.post
+    if item["kind"] == "summary":
+        sender = discord_utils.notify_summary
+    elif item["kind"] == "notify":
+        sender = discord_utils.notify
+    else:
+        sender = discord_utils.post
     files = None
     if item["attachment_blob"] is not None:
         files = {

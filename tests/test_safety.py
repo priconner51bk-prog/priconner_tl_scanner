@@ -474,7 +474,11 @@ class SafetyTests(unittest.TestCase):
         with (
             patch.dict(
                 os.environ,
-                {"DISCORD_TOKEN": "token", "DISCORD_CHANNEL_IDS": "ch1"},
+                {
+                    "DISCORD_TOKEN": "token",
+                    "DISCORD_CHANNEL_IDS": "ch1",
+                    "PRICONNER_MONITOR_RUNTIME_DIR": "",
+                },
                 clear=False,
             ),
             patch.object(
@@ -499,6 +503,7 @@ class SafetyTests(unittest.TestCase):
                 "writeToFirstEmptyCells",
                 lambda sheet_, values, wait_time=0: sheet_.update([[v] for v in values]),
             ),
+            patch.object(discord_channel.youtube_handoff, "enqueue", return_value=[]),
             patch.object(discord_channel, "write_arrival", return_value=None),
         ):
             def fake_http_get(url, **kwargs):

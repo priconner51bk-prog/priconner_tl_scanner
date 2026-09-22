@@ -14,6 +14,7 @@ import datetime_utils as datetime
 import discord_utils as discord
 import gspread_utils as gspread
 import post_change_tracker as post_tracker
+import youtube_handoff
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from tl_formatting import extract_tl_text, format_discord_tl
@@ -757,7 +758,9 @@ def checkNewArrivalsForDiscordChannel(
                     f"チャンネル: {source_channel_text}\n"
                     f"検出日時: {scan_time}"
                 )
-                raw_message = (message.get("content") or "").strip()
+                raw_message = post_tracker.remove_discord_detection_note(
+                    message.get("content") or ""
+                )
                 if is_youtube:
                     display_source_url = post_tracker.suppress_discord_embeds(source_url)
                     source_link = (
@@ -843,6 +846,18 @@ def checkNewArrivalsForDiscordChannel(
     if not new_urls:
         print("Discord投稿結果: 成功0件 失敗0件 対象0件")
         return
+
+    try:
+        handed_off = youtube_handoff.enqueue(
+            item["url"]
+            for item in new_urls
+            if item.get("is_youtube") and item.get("status") == "new"
+        )
+        if handed_off:
+            print(f"YouTube URL引き渡し: {len(handed_off)}件")
+    except Exception as error:
+        # Handoff failure must not stop Discord collection or posting.
+        print(f"警告: YouTube URL引き渡しに失敗: {error}")
 
     sheet = gspread.getDamagesSheet().worksheet("Youtube")
     gspread.writeToFirstEmptyCells(
