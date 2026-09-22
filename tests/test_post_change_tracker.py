@@ -22,6 +22,27 @@ def test_remove_ub_arrow_is_applied_to_update_diff_inputs():
     )
 
 
+def test_comparison_text_ignores_detection_timestamp():
+    previous = "元投稿日時: 2026-09-22 12:00:00 JST\n検出日時: 2026/09/22 13:00:00\n本文"
+    current = "元投稿日時: 2026-09-22 12:00:00 JST\n検出日時: 2026/09/22 13:05:00\n本文"
+    assert post_change_tracker.comparison_text(previous) == post_change_tracker.comparison_text(current)
+
+
+def test_update_diff_ignores_detection_timestamp():
+    record = {
+        "status": "updated",
+        "previous_text": "検出日時: 2026/09/22 13:00:00\n本文",
+        "text": "検出日時: 2026/09/22 13:05:00\n本文が変更された",
+    }
+    assert post_change_tracker.post_content(record) == (
+        "【差分】\n"
+        "- 本文\n"
+        "+ 本文が変更された\n\n"
+        "【現行本文】\n"
+        "検出日時: 2026/09/22 13:05:00\n本文が変更された"
+    )
+
+
 def test_force_full_update_posts_current_body_without_diff():
     record = {
         "status": "updated",

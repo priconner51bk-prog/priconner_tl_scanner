@@ -8,6 +8,9 @@ _ZERO_WIDTH_CHARS = re.compile(r"[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u18
 _DISCORD_MARKDOWN_SPECIALS = re.compile(r"([\\`*_~|{}\[\]()<>#])")
 _DISCORD_URL = re.compile(r"(?<!<)(https?://[^\s<>\\\[\]()]+)")
 _UB_ARROW = re.compile(r"\bUB\s*>\s*", re.IGNORECASE)
+_DETECTION_TIMESTAMP_LINE = re.compile(
+    r"(?m)^[ \t]*(?:[-+]\s+)?検出日時:[^\r\n]*(?:\r?\n|$)"
+)
 POST_SEPARATOR = "━━━━━━━━━━━━━━━━━━━━" * 3
 
 
@@ -90,6 +93,11 @@ def remove_ub_arrow(text):
     return _UB_ARROW.sub("", str(text or ""))
 
 
+def remove_detection_timestamp(text):
+    """Remove scan-time metadata from material post comparisons and diffs."""
+    return _DETECTION_TIMESTAMP_LINE.sub("", str(text or ""))
+
+
 def update_record(record, existing_row, content_index=1, hash_index=2):
     """Mark a record new/updated and retain the content immediately before posting."""
     if not existing_row:
@@ -109,7 +117,10 @@ def post_content(record, content_key="text"):
     current = remove_ub_arrow(record.get(content_key, ""))
     if record.get("status") != "updated" or record.get("force_full"):
         return current
-    diff = git_diff_lines(remove_ub_arrow(record.get("previous_text", "")), current)
+    diff = git_diff_lines(
+        remove_detection_timestamp(remove_ub_arrow(record.get("previous_text", ""))),
+        remove_detection_timestamp(current),
+    )
     if diff:
         return f"【差分】\n{diff}\n\n【現行本文】\n{current}".strip()
     return f"【差分なし】\n【現行本文】\n{current}".strip()
@@ -117,4 +128,8 @@ def post_content(record, content_key="text"):
 
 def comparison_text(*parts):
     """Join only mutable, post-visible fields for update detection."""
-    return "\n".join(str(part or "").strip() for part in parts if str(part or "").strip())
+    return "\n".join(
+        remove_detection_timestamp(part).strip()
+        for part in parts
+        if remove_detection_timestamp(part).strip()
+    )
