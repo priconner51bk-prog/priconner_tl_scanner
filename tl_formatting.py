@@ -18,7 +18,15 @@ _TIME_LINE = re.compile(
     r"^\s*(?:[⭐️⭐︎⭐★☆🔺△#◆◇■□\\\-]|\[[54321-]+\])*"
     r"\d{1,2}:\d{1,2}(?:\s*[-~]\s*\d{1,2}(?::\d{1,2})?)?(?=\D|$)"
 )
-_FORMATION_SYMBOLS = frozenset("〇○◯●◌ー－-XxOo")
+_FORMATION_SYMBOLS = frozenset(
+    "OOo○◯〇⭕●◌0０Xx×✖✕☓❌_ー－—-─＿"
+)
+_FORMATION_LINE_RE = re.compile(
+    rf"^\s*\[?[{re.escape(''.join(_FORMATION_SYMBOLS))}]{{5}}\]?\s*$"
+)
+_FORMATION_INPUT_CONTROLS_RE = re.compile(
+    r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufe0e\ufe0f]"
+)
 _URL_LINE = re.compile(r"(?:https?://|www\.)")
 _STANDALONE_URL_LINE = re.compile(r"^\s*(?:https?://|www\.)\S+\s*$")
 _STAR_LINE = re.compile(r"^\s*(?:⭐️|⭐︎|⭐|★|☆|🔺|△)")
@@ -44,11 +52,10 @@ def _is_formation_line(line):
     and the five-position formation on the next line.  The old extractor
     dropped that second row because it only looked for timestamps or words.
     """
-    stripped = (line or "").strip()
+    stripped = _FORMATION_INPUT_CONTROLS_RE.sub("", (line or "")).strip()
     if not stripped or ":" in stripped:
         return False
-    symbol_count = sum(character in _FORMATION_SYMBOLS for character in stripped)
-    return symbol_count >= 3
+    return _FORMATION_LINE_RE.fullmatch(stripped) is not None
 
 
 def _is_marker_line(line):

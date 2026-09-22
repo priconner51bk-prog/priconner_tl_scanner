@@ -54,6 +54,25 @@ https://example.test/video
     )
 
 
+def test_extract_tl_text_keeps_final_marubatsu_formation_line():
+    content = "0:49　タマキ\n✕✕✕〇✕\n0:40　スミレ\n⭕️❌⭕️❌⭕️"
+    assert tl_formatting.extract_tl_text(content) == content
+
+
+def test_format_discord_tl_passes_final_marubatsu_formation_to_formatter():
+    content = "0:49　タマキ\n✕✕✕〇✕\n0:40　スミレ\n⭕️❌⭕️❌⭕️"
+    received = []
+
+    def formatter(source):
+        received.append(source)
+        return "FORMATTED"
+
+    with patch.object(tl_formatting, "_load_formatter", return_value=formatter):
+        assert tl_formatting.format_discord_tl(content) == "FORMATTED"
+
+    assert received == [content]
+
+
 def test_format_discord_tl_uses_formatter_api():
     with patch.object(tl_formatting, "_load_formatter", return_value=lambda text: "FORMATTED") as load:
         assert tl_formatting.format_discord_tl("1:20 アオイ UB\n1:05 ネラ UB") == "FORMATTED"
