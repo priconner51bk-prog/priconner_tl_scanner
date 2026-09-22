@@ -297,6 +297,17 @@ def _post_to_assigned_boss(post, content, source_boss=None):
     return post(content)
 
 
+def _tracking_status(was_known, old, previous, comparison):
+    """Classify material changes while migrating hashes from older formats."""
+    if not old:
+        return "same" if was_known else "new"
+    return (
+        "same"
+        if post_tracker.comparison_text(previous) == comparison
+        else "updated"
+    )
+
+
 def _notify_assigned_boss(notify, content):
     if notify is discord.notify:
         return discord.notify_summary_to_configured_guilds(content)
@@ -567,10 +578,7 @@ def checkNewArrivalsForDiscordChannel(
                 old = tracking_by_url.get(tracking_key)
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
                 row = [tracking_key, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
-                if was_known and not old:
-                    status = "same"
-                else:
-                    status = "new" if not old else ("updated" if len(old[1]) < 3 or old[1][2] != digest else "same")
+                status = _tracking_status(was_known, old, previous, comparison)
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
                     status = "updated"
                 if (os.environ.get("PRICONNER_FORCE_NEW_POST")
@@ -579,6 +587,8 @@ def checkNewArrivalsForDiscordChannel(
                 if status == "same":
                     if not old:
                         pending_tracking_inserts.append(row)
+                    elif len(old[1]) < 3 or old[1][2] != digest:
+                        pending_tracking_updates.append((old[0], row))
                     continue
                 if old and not os.environ.get("PRICONNER_FORCE_NEW_POST"):
                     pending_tracking_updates.append((old[0], row))
