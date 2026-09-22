@@ -40,7 +40,7 @@ def test_post_succeeds_on_first_try():
     assert post.call_count == 1
 
 
-def test_summary_mentions_resolved_server_member():
+def test_summary_allows_here_mention():
     with patch.object(discord_utils, "_bot_token", return_value="token"), patch.object(
         discord_utils, "channel_id", return_value="channel"
     ), patch.object(
@@ -49,11 +49,8 @@ def test_summary_mentions_resolved_server_member():
         discord_utils.notify_summary("summary")
 
     payload = post.call_args.kwargs["json"]
-    assert payload["content"].startswith("<@722390447665709056>\n")
-    assert payload["allowed_mentions"] == {
-        "parse": [],
-        "users": ["722390447665709056"],
-    }
+    assert payload["content"].startswith("@here\n")
+    assert payload["allowed_mentions"] == {"parse": ["everyone"]}
 
 
 def test_notify_does_not_add_here_mention():

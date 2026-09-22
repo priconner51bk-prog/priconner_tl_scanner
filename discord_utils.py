@@ -11,7 +11,7 @@ import gspread_utils
 DEFAULT_TIMEOUT = 10
 DEFAULT_RETRIES = 2
 DEFAULT_API_INTERVAL = 1.0
-SUMMARY_MENTION_USER_ID = "722390447665709056"
+SUMMARY_MENTION_TEXT = "@here"
 
 
 def _integer_config(section, key, fallback, minimum=0):
@@ -154,6 +154,7 @@ def _send(
     channel_key="boss0_tl",
     files=None,
     allowed_user_ids=None,
+    allowed_parse=None,
 ):
     timeout = _integer_config("discord", "timeout", DEFAULT_TIMEOUT, minimum=1)
     retries = _integer_config("discord", "retries", DEFAULT_RETRIES)
@@ -161,7 +162,7 @@ def _send(
         try:
             payload = {
                 "content": content,
-                "allowed_mentions": {"parse": []},
+                "allowed_mentions": {"parse": allowed_parse or []},
             }
             if allowed_user_ids:
                 payload["allowed_mentions"]["users"] = [
@@ -212,11 +213,11 @@ def notify(text, guild_key="default", channel_key="boss0_tl"):
 
 def notify_summary(text, guild_key="default", channel_key="boss0_tl"):
     return _send(
-        f"<@{SUMMARY_MENTION_USER_ID}>\n{text}",
+        f"{SUMMARY_MENTION_TEXT}\n{text}",
         "サマリー通知送信成功",
         guild_key,
         channel_key,
-        allowed_user_ids=[SUMMARY_MENTION_USER_ID],
+        allowed_parse=["everyone"],
     )
 
 
