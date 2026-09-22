@@ -11,7 +11,7 @@ import gspread_utils
 DEFAULT_TIMEOUT = 10
 DEFAULT_RETRIES = 2
 DEFAULT_API_INTERVAL = 1.0
-SUMMARY_MENTION_TEXT = "@５１"
+SUMMARY_MENTION_USER_ID = "722390447665709056"
 
 
 def _integer_config(section, key, fallback, minimum=0):
@@ -212,10 +212,11 @@ def notify(text, guild_key="default", channel_key="boss0_tl"):
 
 def notify_summary(text, guild_key="default", channel_key="boss0_tl"):
     return _send(
-        f"{SUMMARY_MENTION_TEXT}\n{text}",
+        f"<@{SUMMARY_MENTION_USER_ID}>\n{text}",
         "サマリー通知送信成功",
         guild_key,
         channel_key,
+        allowed_user_ids=[SUMMARY_MENTION_USER_ID],
     )
 
 
