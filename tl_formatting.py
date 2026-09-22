@@ -20,6 +20,7 @@ _TIME_LINE = re.compile(
 )
 _FORMATION_SYMBOLS = frozenset("〇○◯●◌ー－-XxOo")
 _URL_LINE = re.compile(r"(?:https?://|www\.)")
+_STANDALONE_URL_LINE = re.compile(r"^\s*(?:https?://|www\.)\S+\s*$")
 _STAR_LINE = re.compile(r"^\s*(?:⭐️|⭐︎|⭐|★|☆|🔺|△)")
 _SUPPLEMENT_LINE = re.compile(
     r"^\s*(?:※|\*|//|''|(?:補足|注記|注意|備考|最速|目押し|手動|メモ)"
@@ -72,7 +73,10 @@ def _is_block_boundary(line):
     if not stripped:
         return False
     return bool(
-        _URL_LINE.search(stripped)
+        (
+            _URL_LINE.search(stripped)
+            and not _STANDALONE_URL_LINE.fullmatch(stripped)
+        )
         or _HEADING_LINE.match(stripped)
         or len(stripped) > 120
     )
@@ -194,7 +198,11 @@ def extract_tl_text(content):
     )
     if item_count < 2:
         return ""
-    return "\n".join(lines[start : end + 1]).strip()
+    return "\n".join(
+        line
+        for line in lines[start : end + 1]
+        if not _STANDALONE_URL_LINE.fullmatch(line.strip())
+    ).strip()
 
 
 def format_discord_tl(content):

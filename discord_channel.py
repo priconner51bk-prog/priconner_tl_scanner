@@ -19,9 +19,9 @@ from runtime_utils import run_locked
 from tl_formatting import extract_tl_text, format_discord_tl
 from video_relevance import (
     clan_battle_filter_reason,
-    load_content_period,
     load_ng_terms,
 )
+from youtube_common import effective_content_month
 
 DISCORD_API = "https://discord.com/api/v10"
 WAIT_TIME = 0
@@ -322,9 +322,212 @@ def _tracking_status(was_known, old, previous, comparison):
 
 
 def _notify_assigned_boss(notify, content):
+    # The scheduled runner creates one summary from the complete Discord
+    # send queue after every collector has finished. Avoid sending the
+    # Discord-only summary here as well.
+    if os.environ.get("PRICONNER_MONITOR_RUNTIME_DIR"):
+        return None
     if notify is discord.notify:
         return discord.notify_summary_to_configured_guilds(content)
     return notify(content)
+
+
+def _summary_channel_key(item):
+    """Return the destination boss channel for a queued post item."""
+    if item.get("channel_key"):
+        return item["channel_key"]
+    return _post_channel_key(item.get("text", ""), item.get("source_boss"))
+
+
+def _summary_boss_label(channel_key):
+    match = re.fullmatch(r"boss([0-5])_tl", str(channel_key or ""))
+    if not match:
+        return "ボス不明"
+    number = int(match.group(1))
+    return f"ボス{number}" if number else "ボス0（判定不能）"
+
+
+def _summary_title(title):
+    """Keep a title on one readable line in the Discord summary."""
+    return " ".join(str(title or "").split())
+
+
+def _summary_is_youtube(item):
+    if "is_youtube" in item:
+        return bool(item["is_youtube"])
+    content = str(item.get("content") or item.get("text") or "")
+    return bool(re.search(r"(?m)^\s*動画(?:タイトル|URL):", content))
+
+
+def _summary_item_status(item):
+    status = item.get("status")
+    if status:
+        return status
+    content = str(item.get("content") or item.get("text") or "")
+    return "updated" if "【差分】" in content or "更新" in content else "new"
+
+
+def _summary_item_title(item):
+    title = item.get("title")
+    if title:
+        return title
+    content = str(item.get("content") or item.get("text") or "")
+    match = re.search(r"(?m)^\s*(?:\+\s*)?動画タイトル:\s*(.+?)\s*$", content)
+    return match.group(1) if match else ""
+
+
+def _summary_item_author(item):
+    author = item.get("summary_author")
+    if author:
+        return _summary_title(author)
+    content = str(item.get("content") or item.get("text") or "")
+    match = re.search(r"(?m)^\s*(?:\+\s*)?投稿者:\s*(.+?)\s*$", content)
+    return _summary_title(match.group(1)) if match else "（不明）"
+
+
+def _summary_body_excerpt(item, limit=30):
+    content = str(item.get("content") or item.get("text") or "")
+    match = re.search(r"(?m)^\s*Discord投稿本文:\s*(.*)$", content)
+    if match:
+        first_line = match.group(1).strip()
+    else:
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        first_line = next(
+            (line for line in lines if not line.startswith("━")),
+            "",
+        )
+    return _summary_title(first_line)[:limit]
+
+
+def _build_post_summary(items):
+    """Build a compact boss/type/status summary for Discord notifications."""
+    groups = {}
+    queue_preview = any("post_result" not in item for item in items)
+    result_counts = {"成功": 0, "失敗": 0, "未送信": 0, "送信予定": 0}
+    for item in items:
+        result = item.get("post_result", "送信予定")
+        result_counts[result] = result_counts.get(result, 0) + 1
+        channel_key = _summary_channel_key(item)
+        group = groups.setdefault(
+            channel_key,
+            {"items": [], "statuses": {}, "kinds": {}, "titles": []},
+        )
+        group["items"].append(item)
+        status = _summary_item_status(item)
+        group["statuses"][status] = group["statuses"].get(status, 0) + 1
+        kind = "YouTube" if _summary_is_youtube(item) else "Discord本文"
+        group["kinds"][kind] = group["kinds"].get(kind, 0) + 1
+        title = _summary_title(_summary_item_title(item))
+        if title:
+            group["titles"].append(title)
+
+    status_labels = {"new": "新規", "updated": "更新", "same": "変更なし"}
+    ordered_keys = sorted(
+        groups,
+        key=lambda key: int(re.fullmatch(r"boss([0-5])_tl", key).group(1))
+        if re.fullmatch(r"boss([0-5])_tl", key)
+        else 99,
+    )
+    if queue_preview:
+        lines = [f"Discord投稿サマリー（対象{len(items)}件 / 送信予定{len(items)}件）"]
+    else:
+        lines = [
+            (
+                f"Discord投稿サマリー（対象{len(items)}件 / 成功{result_counts.get('成功', 0)}件 / "
+                f"失敗{result_counts.get('失敗', 0)}件）"
+            )
+        ]
+    if result_counts.get("未送信"):
+        lines[0] += f" / 未送信{result_counts['未送信']}件"
+
+    for channel_key in ordered_keys:
+        group = groups[channel_key]
+        status_text = " / ".join(
+            f"{status_labels.get(status, status)}{count}件"
+            for status, count in group["statuses"].items()
+        )
+        kind_text = " / ".join(
+            f"{kind}{count}件" for kind, count in group["kinds"].items()
+        )
+        lines.append(f"\n{_summary_boss_label(channel_key)}: {len(group['items'])}件")
+        lines.append(f"状態: {status_text}")
+        lines.append(f"種別: {kind_text}")
+        for item in group["items"]:
+            title = _summary_title(_summary_item_title(item))
+            author = _summary_item_author(item)
+            if title:
+                lines.append(f"- タイトル: {title} / 投稿者: {author}")
+            else:
+                excerpt = _summary_body_excerpt(item) or "（本文なし）"
+                lines.append(f"- 本文: {excerpt} / 投稿者: {author}")
+
+    summary = "\n".join(lines)
+    # Discord rejects messages over 2000 characters. Keep the per-boss counts
+    # intact and only trim the tail of an unusually large title list.
+    if len(summary) > 1950:
+        summary = summary[:1900].rstrip() + "\n（タイトル一覧の一部は省略）"
+    return summary
+
+
+DISCORD_BODY_LIMIT = 1950
+
+
+def _clip_discord_text(value, limit):
+    """Clip one post section without exceeding Discord's safe body limit."""
+    value = str(value or "").strip()
+    if len(value) <= limit:
+        return value
+    if limit <= 1:
+        return "…"[:limit]
+    return value[: limit - 1].rstrip() + "…"
+
+
+def _build_discord_post_body(prefix, raw_message, source_link, formatted_tl):
+    """Build a Discord post while preserving the formatted TL when possible."""
+    raw_value = raw_message or "（本文なし）"
+    raw_prefix = "Discord投稿本文: "
+    tl_prefix = "\n\nTL（整形済み）:\n```scm\n"
+    tl_suffix = "\n```"
+    separator_length = len(post_tracker.POST_SEPARATOR) + 1
+    body_limit = max(0, DISCORD_BODY_LIMIT - separator_length)
+    formatted_tl = post_tracker.suppress_discord_embeds(formatted_tl)
+
+    # Reserve space for the complete formatted TL before shortening the raw
+    # Discord content. This avoids silently dropping the TL just because the
+    # source message itself is long.
+    tl_length = (
+        len(tl_prefix) + len(formatted_tl) + len(tl_suffix)
+        if formatted_tl
+        else 0
+    )
+    raw_limit = max(
+        0,
+        body_limit
+        - len(prefix)
+        - len(raw_prefix)
+        - len(source_link)
+        - tl_length,
+    )
+    body = (
+        f"{prefix}\n"
+        f"{raw_prefix}{_clip_discord_text(raw_value, raw_limit)}"
+        f"{source_link}"
+    )
+
+    if not formatted_tl:
+        return body
+
+    tl_limit = max(
+        0,
+        body_limit
+        - len(body)
+        - len(tl_prefix)
+        - len(tl_suffix),
+    )
+    clipped_tl = _clip_discord_text(formatted_tl, tl_limit)
+    if not clipped_tl:
+        return body
+    return f"{body}{tl_prefix}{clipped_tl}{tl_suffix}"
 
 
 def fetch_video_info(url):
@@ -407,13 +610,16 @@ def checkNewArrivalsForDiscordChannel(
     except Exception:
         boss_names = []
     ng_terms = load_ng_terms(ss)
-    content_month = gspread.get_config_value("youtube", "content_month", "")
-    if not content_month:
-        content_month = gspread.get_config_value("youtube", "period_month", "")
-    content_period_start = gspread.get_config_value("youtube", "content_period_start", "")
-    content_period_end = gspread.get_config_value("youtube", "content_period_end", "")
-    content_period_start, content_period_end = load_content_period(
-        ss, content_month, content_period_start, content_period_end
+    now = now_factory()
+    period_month = (
+        os.environ.get("PRICONNER_YOUTUBE_PERIOD_MONTH", "").strip()
+        or gspread.get_config_value("youtube", "period_month", "")
+    )
+    content_month = effective_content_month(
+        os.environ.get("PRICONNER_YOUTUBE_CONTENT_MONTH", "").strip()
+        or gspread.get_config_value("youtube", "content_month", ""),
+        period_month,
+        now,
     )
     tracking_rows = tracking.get_all_values() if hasattr(tracking, "get_all_values") else []
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
@@ -485,14 +691,13 @@ def checkNewArrivalsForDiscordChannel(
                 if is_youtube:
                     known_urls.add(tracking_key)
                     info = video_info_factory(source_url)
-                    title = info.get("title") or source_url
+                    video_title = info.get("title") or ""
+                    title = video_title or source_url
                     rejection = clan_battle_filter_reason(
                         info,
                         boss_names=boss_names[:5],
                         ng_terms=ng_terms,
                         content_month=content_month,
-                        content_period_start=content_period_start,
-                        content_period_end=content_period_end,
                     )
                     if rejection:
                         print(f"skip: Discord経由YouTube内容フィルタ ({rejection}): {title}")
@@ -552,44 +757,30 @@ def checkNewArrivalsForDiscordChannel(
                     f"チャンネル: {source_channel_text}\n"
                     f"検出日時: {scan_time}"
                 )
+                raw_message = (message.get("content") or "").strip()
                 if is_youtube:
                     display_source_url = post_tracker.suppress_discord_embeds(source_url)
                     source_link = (
                         f"\n投稿元リンク: {post_tracker.suppress_discord_embeds(discord_post_url)}"
                         if discord_post_url else ""
                     )
-                    body = (
+                    fixed_body = (
                         f"{metadata}\n"
                         f"動画タイトル: {title}\n"
                         f"動画URL: {display_source_url}\n"
-                        f"{post_tracker.markdown_note_line('Discordメッセージから検出')}\n"
-                        f"{source_link}"
+                        f"{post_tracker.markdown_note_line('Discordメッセージから検出')}"
                     )
-                    if formatted_tl:
-                        formatted_body = post_tracker.add_post_separator(
-                            f"{body}\n\nTL（整形済み）:\n```scm\n"
-                            f"{post_tracker.suppress_discord_embeds(formatted_tl)}\n```"
-                        )
-                        if len(formatted_body) <= 1950:
-                            body = formatted_body
+                    body = _build_discord_post_body(
+                        fixed_body, raw_message, source_link, formatted_tl
+                    )
                 else:
-                    raw_message = (message.get("content") or "").strip()
                     source_link = (
                         f"\n投稿元リンク: {discord_post_url}"
                         if discord_post_url else ""
                     )
-                    body = (
-                        f"{metadata}\n"
-                        f"Discord投稿本文: {raw_message or '（本文なし）'}"
-                        f"{source_link}"
+                    body = _build_discord_post_body(
+                        metadata, raw_message, source_link, formatted_tl
                     )
-                    if formatted_tl:
-                        formatted_body = post_tracker.add_post_separator(
-                            f"{body}\n\nTL（整形済み）:\n```scm\n"
-                            f"{formatted_tl}\n```"
-                        )
-                        if len(formatted_body) <= 1950:
-                            body = formatted_body
                 body = post_tracker.add_post_separator(body)
                 comparison = post_tracker.comparison_text(body)
                 digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
@@ -612,7 +803,16 @@ def checkNewArrivalsForDiscordChannel(
                     pending_tracking_updates.append((old[0], row))
                 elif not old:
                     pending_tracking_inserts.append(row)
-                new_urls.append({"url": source_url, "tracking_key": tracking_key, "is_youtube": is_youtube, "source_boss": source_boss, "text": body, "status": status, "previous_text": previous})
+                new_urls.append({
+                    "url": source_url,
+                    "tracking_key": tracking_key,
+                    "is_youtube": is_youtube,
+                    "source_boss": source_boss,
+                    "text": body,
+                    "title": video_title if is_youtube else "",
+                    "status": status,
+                    "previous_text": previous,
+                })
                 print(f"new: {source_url}")
         retry_sleep(wait_time)
 
@@ -657,6 +857,7 @@ def checkNewArrivalsForDiscordChannel(
     post_items = new_urls[:limit] if limit else new_urls
     for item in post_items:
         if os.environ.get("PRICONNER_NO_POST"):
+            item["post_result"] = "未送信"
             continue
         try:
             _post_to_assigned_boss(
@@ -665,7 +866,9 @@ def checkNewArrivalsForDiscordChannel(
                 item.get("source_boss"),
             )
             post_success += 1
+            item["post_result"] = "成功"
         except Exception as error:
+            item["post_result"] = "失敗"
             post_failures.append((item["url"], str(error)))
             print(f"失敗: Discord URL通知 {item['url']}: {error}")
         retry_sleep(wait_time)
@@ -680,7 +883,7 @@ def checkNewArrivalsForDiscordChannel(
     )
 
     try:
-        _notify_assigned_boss(notify, f"Discord新着{len(new_urls)}件")
+        _notify_assigned_boss(notify, _build_post_summary(post_items))
     except Exception as error:
         print(f"失敗: Discord集計通知: {error}")
 

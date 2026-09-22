@@ -8,6 +8,11 @@ def test_extract_tl_text_filters_message_header():
     assert tl_formatting.extract_tl_text(content) == "1:20 アオイ→UB\n1:05 ネラ UB"
 
 
+def test_extract_tl_text_keeps_tl_across_standalone_url():
+    content = "0:49 タマキ\nhttps://youtu.be/abc\n0:40 スミレ"
+    assert tl_formatting.extract_tl_text(content) == "0:49 タマキ\n0:40 スミレ"
+
+
 def test_extract_tl_text_returns_one_contiguous_block_not_scattered_matches():
     content = """説明欄の補足 4:02 は動画時間です
 オート設定の説明

@@ -511,7 +511,7 @@ class SafetyTests(unittest.TestCase):
                             "content": "https://www.youtube.com/watch?v=known",
                         },
                         {
-                            "content": "https://youtu.be/new1",
+                            "content": "水属性のTLです\nhttps://youtu.be/new1",
                         },
                     ],
                 )
@@ -536,7 +536,28 @@ class SafetyTests(unittest.TestCase):
         self.assertIn("動画タイトル: プリコネ クラバト TL", posted[0])
         self.assertIn("**備考:** Discordメッセージから検出", posted[0])
         self.assertIn("動画URL: <https://www.youtube.com/watch?v=new1>", posted[0])
-        self.assertEqual(notified, ["Discord新着1件"])
+        self.assertIn("Discord投稿本文: 水属性のTLです\nhttps://youtu.be/new1", posted[0])
+        self.assertEqual(len(notified), 1)
+        self.assertIn("Discord投稿サマリー", notified[0])
+        self.assertIn("ボス1: 1件", notified[0])
+        self.assertIn("状態: 新規1件", notified[0])
+        self.assertIn("種別: YouTube1件", notified[0])
+        self.assertIn(
+            "- タイトル: プリコネ クラバト TL / 投稿者: （不明）",
+            notified[0],
+        )
+
+    def test_discord_stage_keeps_formatted_tl_when_source_body_is_long(self):
+        body = discord_channel._build_discord_post_body(
+            "投稿者: test",
+            "本文" * 1500,
+            "\n投稿元リンク: https://discord.com/source",
+            "0:49 タマキ\n0:40 スミレ",
+        )
+
+        self.assertLessEqual(len(body), discord_channel.DISCORD_BODY_LIMIT)
+        self.assertIn("TL（整形済み）", body)
+        self.assertIn("0:49 タマキ", body)
 
     def test_token_fetch_saves_token_into_config(self):
         with tempfile.TemporaryDirectory() as directory:
