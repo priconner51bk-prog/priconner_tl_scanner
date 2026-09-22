@@ -297,6 +297,19 @@ def _post_to_assigned_boss(post, content, source_boss=None):
     return post(content)
 
 
+def _is_non_content_discord_message(content):
+    """Ignore empty or month-boundary marker messages from source channels."""
+    normalized = post_tracker.normalize_comparison_text(content)
+    if not normalized:
+        return True
+    return bool(
+        re.fullmatch(
+            r"=+\s*ここから\s*\d{4}年\d{1,2}月\s*=+",
+            normalized,
+        )
+    )
+
+
 def _tracking_status(was_known, old, previous, comparison):
     """Classify material changes while migrating hashes from older formats."""
     if not old:
@@ -441,6 +454,11 @@ def checkNewArrivalsForDiscordChannel(
                     continue
             message_content = (message.get("content") or "")[:500]
             youtube_urls = extract_youtube_urls(message)
+            if not youtube_urls and _is_non_content_discord_message(
+                message.get("content")
+            ):
+                print(f"skip: Discord収集の空本文・月境界マーカー {message.get('id') or channel_id}")
+                continue
             message_id = str(message.get("id") or "")
             discord_post_url = (
                 f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"

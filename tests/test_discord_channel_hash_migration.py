@@ -33,3 +33,11 @@ def test_tracking_status_still_detects_material_change():
         previous,
         discord_channel.post_tracker.comparison_text(current),
     ) == "updated"
+
+
+def test_non_content_discord_messages_include_empty_and_month_markers():
+    assert discord_channel._is_non_content_discord_message("")
+    assert discord_channel._is_non_content_discord_message(
+        "＝＝＝＝ ここから 2026年9月 ＝＝＝＝"
+    )
+    assert not discord_channel._is_non_content_discord_message("全SET")
