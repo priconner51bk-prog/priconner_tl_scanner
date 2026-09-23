@@ -62,11 +62,11 @@ def test_only_main_sheet_unregistered_urls_are_selected_for_experimental_post():
 def test_experimental_post_targets_summary_channel_and_deduplicates_by_url():
     item = {"url": "https://www.youtube.com/watch?v=abcdefghijk", "summary_author": "配信者"}
     with patch("discord_utils.post_to_configured_guilds", return_value=["queued"]) as post:
-        result = post_new_url_to_experimental(item, "new video")
+        result = post_new_url_to_experimental(item)
 
     assert result == ["queued"]
     post.assert_called_once_with(
-        "new video",
+        "https://www.youtube.com/watch?v=abcdefghijk",
         channel_key="summary",
         guild_keys=["experimental"],
         dedupe_key="youtube-new-experimental:https://www.youtube.com/watch?v=abcdefghijk",

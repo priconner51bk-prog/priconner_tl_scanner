@@ -1,0 +1,30 @@
+# SQLite sent_at period: 2026-09-22T12:00:00+09:00 <= sent_at < 2026-09-30T00:00:00+09:00
+# URLs absent from the visible Youtube tab; the Apps Script API is authoritative.
+# Lines beginning with # are comments.
+https://www.youtube.com/watch?v=FyHekzgHFw0
+https://www.youtube.com/watch?v=sikg2jbVWQU
+https://www.youtube.com/watch?v=vpNO2tQc1as
+https://www.youtube.com/watch?v=DFvP23ZCFAc
+https://www.youtube.com/watch?v=PkVd7bZlA3M
+https://www.youtube.com/watch?v=YAcdfUyp5QM
+https://www.youtube.com/watch?v=dJdpDOdvAcg
+https://www.youtube.com/watch?v=gAAXavQOoBY
+https://www.youtube.com/watch?v=FTcyJJy0fC4
+https://www.youtube.com/watch?v=7HtUtWZQDAk
+https://www.youtube.com/watch?v=MPdLJ1Qlb1c
+https://www.youtube.com/watch?v=tMgffzxR4kA
+https://www.youtube.com/watch?v=kE-igC-qxjA
+https://www.youtube.com/watch?v=Lhx46MKrgz4
+https://www.youtube.com/watch?v=APmAjWCtWLo
+https://www.youtube.com/watch?v=Gdu8zJnUznU
+https://www.youtube.com/watch?v=W-vRzAKCGAQ
+https://www.youtube.com/watch?v=nSCCVK0WVTM
+https://www.youtube.com/watch?v=UJMn8Ehtu5o
+https://www.youtube.com/watch?v=zEdnPqrEcg0
+https://www.youtube.com/watch?v=HY0_ZHwpgd4
+https://www.youtube.com/watch?v=OnJXZExbTlw
+https://www.youtube.com/watch?v=320k3OWJ3dI
+https://www.youtube.com/watch?v=sx9v2x_EiMI
+https://www.youtube.com/watch?v=g8rklt6Le-k
+https://www.youtube.com/watch?v=p6_JztrDh7U
+https://www.youtube.com/watch?v=Zqm_XHBR3m0

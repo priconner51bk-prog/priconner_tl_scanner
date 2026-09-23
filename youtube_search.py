@@ -26,6 +26,7 @@ from youtube_common import (
     is_in_youtube_period,
     log_youtube_registration_results,
     post_new_url_to_experimental,
+    successfully_registered_youtube_urls,
     video_metadata_fields,
     video_post_body,
     write_urls_with_retry,
@@ -606,7 +607,8 @@ def findYouTubeVideo(
         registration_results = _write_urls_with_retry(write_urls, damage_urls, sleep)
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
-    newly_registered = log_youtube_registration_results(registration_results)
+    log_youtube_registration_results(registration_results)
+    registration_checked = successfully_registered_youtube_urls(registration_results)
 
     try:
         completed_handoff_urls = set(handoff_urls) - handoff_retry_urls
@@ -626,9 +628,9 @@ def findYouTubeVideo(
             )
             item_content = post_tracker.post_content({**item, "text": body})
             dedupe_key = f"youtube-new:{item['url']}" if item.get("status") == "new" else None
-            if item["url"] in newly_registered:
+            if item.get("status") == "new" and item["url"] in registration_checked:
                 try:
-                    post_new_url_to_experimental(item, item_content)
+                    post_new_url_to_experimental(item)
                 except Exception as error:
                     print(f"失敗: 実験サーバー新着TL通知 {item['url']}: {error}")
             _post_to_channel(

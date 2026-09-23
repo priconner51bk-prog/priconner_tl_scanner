@@ -25,6 +25,7 @@ from youtube_common import (
     is_in_youtube_period,
     log_youtube_registration_results,
     post_new_url_to_experimental,
+    successfully_registered_youtube_urls,
     video_metadata_fields,
     video_post_body,
     write_urls_with_retry,
@@ -605,7 +606,8 @@ def checkNewArrivalsForYouTube(
         registration_results = _write_urls_with_retry(write_urls, damage_urls, sleep)
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
-    newly_registered = log_youtube_registration_results(registration_results)
+    log_youtube_registration_results(registration_results)
+    registration_checked = successfully_registered_youtube_urls(registration_results)
 
     limit = 1 if os.environ.get("PRICONNER_FORCE_NEW_LIMIT_ONE") else int(os.environ.get("PRICONNER_FORCE_POST_LIMIT", "0") or 0)
     post_items = pending_posts[:limit] if limit else pending_posts
@@ -619,9 +621,9 @@ def checkNewArrivalsForYouTube(
             )
             item_content = post_tracker.post_content({**item, "text": body})
             dedupe_key = f"youtube-new:{item['url']}" if item.get("status") == "new" else None
-            if item["url"] in newly_registered:
+            if item.get("status") == "new" and item["url"] in registration_checked:
                 try:
-                    post_new_url_to_experimental(item, item_content)
+                    post_new_url_to_experimental(item)
                 except Exception as error:
                     print(f"失敗: 実験サーバー新着TL通知 {item['url']}: {error}")
             _post_configured(

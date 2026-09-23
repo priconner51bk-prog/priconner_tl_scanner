@@ -74,6 +74,19 @@ def unregistered_youtube_urls(registration_results):
     }
 
 
+def successfully_registered_youtube_urls(registration_results):
+    """Return URLs whose API check completed, including registered duplicates."""
+    if not isinstance(registration_results, (list, tuple)):
+        return set()
+    return {
+        item.get("url")
+        for item in registration_results
+        if isinstance(item, dict)
+        and item.get("status") in {"accepted", "already_registered", "already_queued"}
+        and item.get("url")
+    }
+
+
 def log_youtube_registration_results(registration_results):
     """Log API insertions and duplicates with their returned sheet row."""
     results = registration_results if isinstance(registration_results, (list, tuple)) else []
@@ -91,15 +104,15 @@ def log_youtube_registration_results(registration_results):
     return unregistered_youtube_urls(results)
 
 
-def post_new_url_to_experimental(item, body):
-    """Queue a newly registered YouTube video in the experimental arrivals channel."""
+def post_new_url_to_experimental(item):
+    """Queue only a new video's URL in the experimental arrivals channel."""
     import discord_utils
 
     url = str(item.get("url") or "").strip()
     if not url:
         return []
     return discord_utils.post_to_configured_guilds(
-        body,
+        url,
         channel_key="summary",
         guild_keys=["experimental"],
         dedupe_key=f"youtube-new-experimental:{url}",
