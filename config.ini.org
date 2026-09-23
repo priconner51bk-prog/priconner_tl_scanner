@@ -26,7 +26,7 @@ url_api_token=
 
 [monitor]
 runtime_dir=
-stages=youtube-channel,youtube-search,worrychefs,discord-channel
+stages=youtube-channel,youtube-search-ytdlp,youtube-search-pytubefix,youtube-search-direct,youtube-search,worrychefs,discord-channel
 python=python3
 markdown_output_dir=
 

@@ -12,6 +12,8 @@ import discord_utils as discord
 import gspread_utils as gspread
 import post_change_tracker as post_tracker
 import youtube_handoff
+import youtube_search_backends
+import youtube_search_candidates
 from new_arrivals_markdown import write_arrival
 from runtime_utils import run_locked
 from video_relevance import (
@@ -133,7 +135,7 @@ class YTDLPChannel:
 _write_urls_with_retry = write_urls_with_retry
 
 
-def search_youtube(query, now_factory=None):
+def search_youtube_ytdlp(query, now_factory=None, filter_period=True):
     period_days = gspread.get_int_config_value(
         "youtube", "period_days", DEFAULT_PERIOD_DAYS, minimum=1
     )
@@ -149,6 +151,9 @@ def search_youtube(query, now_factory=None):
     env_limit = os.environ.get("PRICONNER_YOUTUBE_SEARCH_LIMIT", "").strip()
     if env_limit.isdigit():
         search_limit = max(1, min(int(env_limit), MAX_SEARCH_LIMIT))
+    date_after = os.environ.get("PRICONNER_YOUTUBE_SEARCH_DATE_AFTER", "").strip()
+    date_before = os.environ.get("PRICONNER_YOUTUBE_SEARCH_DATE_BEFORE", "").strip()
+
     options = {
         "quiet": True,
         "skip_download": True,
@@ -161,8 +166,6 @@ def search_youtube(query, now_factory=None):
         "sleep_interval_requests": 0.5,
         "playlistend": search_limit,
     }
-    date_after = os.environ.get("PRICONNER_YOUTUBE_SEARCH_DATE_AFTER", "").strip()
-    date_before = os.environ.get("PRICONNER_YOUTUBE_SEARCH_DATE_BEFORE", "").strip()
     search_start = os.environ.get("PRICONNER_YOUTUBE_SEARCH_START", "").strip()
     if date_after:
         options["dateafter"] = date_after
@@ -191,21 +194,52 @@ def search_youtube(query, now_factory=None):
     now = _as_utc(now_factory() if now_factory else DateTime.now(timezone.utc))
     videos = []
     seen_urls = set()
-    for entry in result.get("entries", []):
+    search_log = [
+        f"YouTube検索結果: キーワード={query!r} 件数={len(entries)}/{search_limit}"
+    ]
+    for index, entry in enumerate(entries, start=1):
         if not entry:
+            search_log.append(f"  [{index:02d}] タイトル取得不可 | 投稿日時: 不明")
             continue
         try:
             video = YTDLPVideo(entry)
         except (KeyError, TypeError, ValueError):
+            title = str(entry.get("title") or "タイトル取得不可").replace("\n", " ")
+            search_log.append(f"  [{index:02d}] {title} | 投稿日時: 不明")
             continue
+        publish_date = (
+            datetime.dateTime2String(video.publish_date)
+            if video.publish_date is not None
+            else "不明"
+        )
+        title = str(video.title or "タイトル取得不可").replace("\n", " ")
+        search_log.append(f"  [{index:02d}] {title} | 投稿日時: {publish_date} JST")
         if video.watch_url in seen_urls:
             continue
         seen_urls.add(video.watch_url)
-        if is_in_youtube_period(
+        if not filter_period or is_in_youtube_period(
             video.publish_date, now, period_days, period_mode, period_month
         ):
             videos.append(video)
+    print("\n".join(search_log))
     return videos
+
+
+def search_youtube(query, now_factory=None):
+    """Compatibility entry point; yt-dlp remains the processing source."""
+    return search_youtube_ytdlp(query, now_factory=now_factory)
+
+
+def search_youtube_pytubefix(query, now_factory=None):
+    return youtube_search_backends.search_youtube_pytubefix(
+        query, video_factory=YTDLPVideo
+    )
+
+
+def search_youtube_direct(query, now_factory=None):
+    return youtube_search_backends.search_youtube_direct(
+        query, video_factory=YTDLPVideo
+    )
 
 
 def enrich_video(video):
@@ -288,7 +322,7 @@ def is_recent_video(
 
 def findYouTubeVideo(
     spreadsheet=None,
-    search_factory=search_youtube,
+    search_factory=None,
     channel_factory=YTDLPChannel,
     post=discord.post,
     notify=discord.notify,
@@ -383,16 +417,73 @@ def findYouTubeVideo(
         for boss_index, bossName in selected
         for search_term in TITLE_SEARCH_MARKERS.get(bossName, (bossName,))
     ]
+    use_candidate_snapshots = search_factory is None
+    comparison_mode = search_factory is search_youtube
+    if use_candidate_snapshots:
+        search_factory = lambda query: youtube_search_candidates.load_candidates(
+            query, YTDLPVideo, now=now
+        )
     search_results = {}
+    comparison_results = {}
     if search_jobs:
-        with ThreadPoolExecutor(max_workers=min(SEARCH_WORKERS, len(search_jobs))) as executor:
-            futures = {
-                executor.submit(search_factory, search_term): job
-                for job in search_jobs
-                for search_term in [job[2]]
-            }
+        backends = (
+            youtube_search_backends.SEARCH_BACKENDS
+            if comparison_mode
+            else ("yt-dlp",)
+        )
+        backend_jobs = [
+            (job, backend)
+            for job in search_jobs
+            for backend in backends
+        ]
+        with ThreadPoolExecutor(max_workers=min(SEARCH_WORKERS * len(backends), len(backend_jobs))) as executor:
+            futures = {}
+            for job, backend in backend_jobs:
+                _, boss_name, search_term = job
+                if backend == "yt-dlp" and not comparison_mode:
+                    # Keep injected search factories useful for local callers.
+                    future = executor.submit(search_factory, search_term)
+                    futures[future] = (job, backend, True)
+                else:
+                    future = executor.submit(
+                        youtube_search_backends.run_search_backend,
+                        backend,
+                        search_term,
+                        search_youtube_ytdlp,
+                        YTDLPVideo,
+                        now_factory=now_factory,
+                    )
+                    futures[future] = (job, backend, False)
+                print(f"検索対象: ボス名={boss_name} キーワード={search_term} source={backend}")
             for future in as_completed(futures):
-                search_results[futures[future]] = future.result()
+                job, backend, injected = futures[future]
+                result = future.result()
+                if injected:
+                    result = {
+                        "videos": result.videos if hasattr(result, "videos") else result,
+                        "elapsed": 0.0,
+                        "error": "",
+                    }
+                comparison_results.setdefault(job, {})[backend] = result
+        for job, results in comparison_results.items():
+            query = job[2]
+            primary = results.get("yt-dlp", {"videos": []})
+            search_results[job] = primary["videos"]
+            if comparison_mode:
+                youtube_search_backends.write_search_comparison(query, results, now)
+                summaries = []
+                for backend in backends:
+                    result = results.get(backend, {})
+                    summaries.append(
+                        f"{backend}={len(result.get('videos', []))}件"
+                        + (f" ({result['error']})" if result.get("error") else "")
+                    )
+                print(f"検索比較: キーワード={query!r} " + " / ".join(summaries))
+            elif use_candidate_snapshots:
+                print(
+                    f"集約検索候補: キーワード={query!r} "
+                    f"件数={len(primary['videos'])}"
+                )
 
     handoff_groups = {}
     for video in handoff_videos:
@@ -427,18 +518,24 @@ def findYouTubeVideo(
         sleep(wait_time)
 
         for video in videos:
-            if (not is_handoff_group and not is_recent_video(
-                video,
-                now=now,
-                period_days=period_days,
-                period_mode=period_mode,
-                period_month=period_month,
-            )):
-                continue
-            # Search results are intentionally flat.  Only period-matching
-            # candidates reach this more expensive metadata request.
             if not is_handoff_group:
-                video = enrich_video(video)
+                needs_date_lookup = video.publish_date is None
+                if needs_date_lookup:
+                    # Pytubefix applies the recent-upload search filter, but its
+                    # search cards do not include an exact publication date.
+                    video = enrich_video(video)
+                if not is_recent_video(
+                    video,
+                    now=now,
+                    period_days=period_days,
+                    period_mode=period_mode,
+                    period_month=period_month,
+                ):
+                    continue
+                if not needs_date_lookup:
+                    # Flat yt-dlp results with a date still need full metadata
+                    # for the relevance filter and post body.
+                    video = enrich_video(video)
             videoUrl = youtube_handoff.canonical_url(video.watch_url)
             if (
                 is_handoff_group
@@ -451,6 +548,7 @@ def findYouTubeVideo(
                 boss_names=bossNames[:5],
                 ng_terms=ng_terms,
                 content_month=content_month,
+                required_boss="" if is_handoff_group else bossName,
             )
             if rejection:
                 print(f"skip: YouTube検索内容フィルタ ({rejection}): {video.title}")

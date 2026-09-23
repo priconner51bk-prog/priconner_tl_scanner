@@ -33,6 +33,12 @@ CLAN_BATTLE_TITLE_PATTERN = re.compile(
     r"(?i)(?:クラバト|クランバトル|clan\s*battle|[1-5]\s*段階|"
     r"[1-5]\s*ボス|\bD[1-5]\d{1,2}P?\b|\bEX\s*[1-5]\b)"
 )
+KEYWORD_BATTLE_CONTEXT_PATTERN = re.compile(
+    r"(?i)(?:クラバト|クランバトル|clan\s*battle|[1-5]\s*段階|"
+    r"[1-5]\s*ボス|\bD[1-5]\d{1,2}P?\b|\bEX\s*[1-5]\b|"
+    r"\b(?:TL|UB)\b|持越し|持ち越し|(?<!\d)(?!20\d{6}(?!\d))"
+    r"\d{5,8}(?!\d))"
+)
 EXPLICIT_BATTLE_MONTH_PATTERN = re.compile(
     r"(?P<month>1[0-2]|[1-9])\s*月(?:の)?\s*(?:クランバトル|クラバト)",
     re.IGNORECASE,
@@ -42,12 +48,41 @@ EXPLICIT_BATTLE_MONTH_PATTERN = re.compile(
 # spreadsheet.  The authoritative editable list is the NGワード worksheet.
 DEFAULT_NG_TERMS = (
     "原神",
+    "genshin impact",
+    "genshin",
+    "深境螺旋",
     "崩壊スターレイル",
+    "崩スタ",
+    "honkai star rail",
     "ブルーアーカイブ",
+    "ブルアカ",
+    "blue archive",
     "学マス",
+    "学園アイドルマスター",
     "ウマ娘",
+    "チャンピオンズミーティング",
     "モンスト",
     "パズドラ",
+    "勝利の女神",
+    "nikke",
+    "アークナイツ",
+    "arknights",
+    "ゼンレスゾーンゼロ",
+    "ゼンゼロ",
+    "zenless zone zero",
+    "fgo",
+    "fate grand order",
+    "アズールレーン",
+    "azur lane",
+    "焼肉",
+    "黒毛和牛",
+    "飲食店経営",
+    "warhammer",
+    "ウォーハンマー",
+    "age of sigmar",
+    "aos",
+    "プラモデル",
+    "筆塗り",
     "ヘブンバーンズレッド",
     "ヘブバン",
     "valorant",
@@ -65,6 +100,28 @@ def _normalize(value):
 
 def _contains_any(text, terms):
     return any(_normalize(term) in text for term in terms)
+
+
+def _compact(value):
+    """Remove spacing and punctuation so formatted variants still match."""
+    return re.sub(r"[^\w]", "", _normalize(value), flags=re.UNICODE)
+
+
+def _matches_ng(text, term):
+    normalized_term = _normalize(term).strip()
+    if not normalized_term:
+        return False
+    # Latin acronyms and game names should not match inside unrelated words.
+    if re.fullmatch(r"[a-z0-9]+(?:\s+[a-z0-9]+)*", normalized_term):
+        words = re.findall(r"[a-z0-9]+", normalized_term)
+        phrase = r"[\W_]*".join(re.escape(word) for word in words)
+        pattern = rf"(?<![a-z0-9]){phrase}(?![a-z0-9])"
+        return bool(re.search(pattern, text))
+    if normalized_term in text:
+        return True
+    compact_term = _compact(normalized_term)
+    compact_text = _compact(text)
+    return bool(compact_term and compact_term in compact_text)
 
 
 def relevance_score(video, boss_names=()):
@@ -142,15 +199,28 @@ def clan_battle_filter_reason(
     boss_names=(),
     ng_terms=(),
     content_month="",
+    required_boss="",
 ):
     """Return a rejection reason, or an empty string when the video is allowed."""
     title, combined = _video_text(video)
-    normalized_ng = tuple(_normalize(term) for term in ng_terms if str(term).strip())
-    hit = next((term for term in normalized_ng if term in combined), "")
+    normalized_ng = tuple(
+        _normalize(term).strip() for term in ng_terms if str(term).strip()
+    )
+    hit = next((term for term in normalized_ng if _matches_ng(combined, term)), "")
     if hit:
         return f"NGワード: {hit}"
     if _has_content_month_conflict(title, content_month):
         return "クラバト内容月が対象月外"
+    required_boss_terms = (required_boss,)
+    if _normalize(required_boss) == "メデューサ":
+        required_boss_terms = (*required_boss_terms, *BOSS_ALIAS_TERMS)
+    if required_boss and not _contains_any(title, required_boss_terms):
+        return f"検索対象ボスがタイトルにない: {required_boss}"
+    if required_boss and not (
+        _contains_any(title, POSITIVE_GAME_TERMS)
+        or KEYWORD_BATTLE_CONTEXT_PATTERN.search(title)
+    ):
+        return "タイトルにプリコネ/クラバトを示す語がない"
     if (
         not _contains_any(combined, POSITIVE_GAME_TERMS)
         and not _contains_any(combined, boss_names)

@@ -17,12 +17,28 @@ from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 WINDOWLESS_SUBPROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 ROOT_DIR = Path(__file__).resolve().parent
-DEFAULT_STAGES = ("youtube-channel", "youtube-search", "worrychefs", "discord-channel")
+DEFAULT_STAGES = (
+    "youtube-channel",
+    "youtube-search-ytdlp",
+    "youtube-search-pytubefix",
+    "youtube-search-direct",
+    "youtube-search",
+    "worrychefs",
+    "discord-channel",
+)
 STAGE_SCRIPTS = {
     "youtube-channel": "youtube_channel.py",
     "youtube-search": "youtube_search.py",
+    "youtube-search-ytdlp": "youtube_search_ytdlp.py",
+    "youtube-search-pytubefix": "youtube_search_pytubefix.py",
+    "youtube-search-direct": "youtube_search_direct.py",
     "worrychefs": "worrychefs.py",
     "discord-channel": "discord_channel.py",
+}
+SOURCE_ONLY_STAGES = {
+    "youtube-search-ytdlp",
+    "youtube-search-pytubefix",
+    "youtube-search-direct",
 }
 
 
@@ -149,6 +165,9 @@ def run_stages(
             child_environment["PRICONNER_YOUTUBE_HANDOFF_PATH"] = str(
                 shared_runtime_dir / "youtube_url_handoff.json"
             )
+            child_environment["PRICONNER_MONITOR_SHARED_RUNTIME_DIR"] = str(
+                shared_runtime_dir
+            )
             command_options = {
                 "cwd": root_dir,
                 "check": False,
@@ -169,6 +188,16 @@ def run_stages(
                 exit_code=exit_code,
             )
             return exit_code
+
+    if stages and all(stage in SOURCE_ONLY_STAGES for stage in stages):
+        store.update(
+            status="success",
+            stage="completed",
+            failure_stage=None,
+            finished_at=store.clock().isoformat(),
+            exit_code=0,
+        )
+        return 0
 
     try:
         _queue_post_summary(queue_path, run_started_at)
@@ -254,7 +283,8 @@ def main(argv=None):
         lock_name = "monitor_runner-" + "-".join(stages) + ".lock"
         with acquire_lock(state_runtime_dir / lock_name):
             legacy_queue_path = state_runtime_dir / "discord_queue.sqlite3"
-            if legacy_queue_path != queue_path:
+            source_only_run = all(stage in SOURCE_ONLY_STAGES for stage in stages)
+            if legacy_queue_path != queue_path and not source_only_run:
                 migrated = discord_queue.migrate_queue(legacy_queue_path, queue_path)
                 if migrated["migrated"]:
                     print(

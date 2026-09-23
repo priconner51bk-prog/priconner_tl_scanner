@@ -8,7 +8,10 @@
 | --- | --- | ---: | ---: |
 | `PriconnerClanBattle-Scheduler` | 個別タスクの無効化・期間判定・有効化 | 毎日 | 12:00 |
 | `PriconnerClanBattle-priconner_tl_scanner-youtube-channel` | YouTubeチャンネル収集 | 15分 | 12:00〜 |
-| `PriconnerClanBattle-priconner_tl_scanner-youtube-search` | YouTubeキーワード収集 | 5分 | 12:02〜 |
+| `PriconnerClanBattle-priconner_tl_scanner-youtube-search-ytdlp` | yt-dlp候補収集 | 5分 | 12:02〜 |
+| `PriconnerClanBattle-priconner_tl_scanner-youtube-search-pytubefix` | pytubefix候補収集 | 5分 | 12:03〜 |
+| `PriconnerClanBattle-priconner_tl_scanner-youtube-search-direct` | YouTube直検索候補収集 | 5分 | 12:04〜 |
+| `PriconnerClanBattle-priconner_tl_scanner-youtube-search` | 候補統合・Sheets/Discord反映 | 5分 | 12:05〜 |
 | `PriconnerClanBattle-priconner_tl_scanner-discord-channel` | Discordチャンネル収集 | 5分 | 12:01〜 |
 
 ```powershell
@@ -39,6 +42,12 @@ Get-ScheduledTask -TaskPath '\' |
 
 ```sh
 python monitor_runner.py --stages youtube-search
+```
+
+候補収集から統合まで手動で一巡する場合:
+
+```sh
+python monitor_runner.py --stages youtube-search-ytdlp,youtube-search-pytubefix,youtube-search-direct,youtube-search
 ```
 
 ## 3. Discord投稿
@@ -93,11 +102,17 @@ Get-ScheduledTask -TaskPath '\' |
   Where-Object TaskName -like 'PriconnerClanBattle-*'
 ```
 
-収集ステージは内部の処理単位です。中央スケジューラーにはYouTubeチャンネル収集とYouTubeキーワード収集の2ジョブを登録し、それぞれ異なる間隔で実行します。各ジョブは中央の `scheduler.py --run-job` を経由して `monitor_runner.py` を起動します。
+収集ステージは内部の処理単位です。中央スケジューラーにはYouTubeチャンネル収集、3つの検索候補収集、候補統合、Discordチャンネル収集を個別ジョブとして登録し、それぞれ異なる間隔で実行します。候補収集は毎5分、1分ずつ開始時刻をずらし、最後に候補統合を実行します。各ジョブは中央の `scheduler.py --run-job` を経由して `monitor_runner.py` を起動します。
 
 YouTube登録チャンネルは、最新動画投稿日から `maintenance.inactive_days` 日を超えると通常走査を省略します。そのチャンネルの動画がYouTube検索で見つかった場合は、検索結果を保存し、最新投稿日を更新します。
 
 YouTubeの公開対象月は通常、JSTの当月を自動使用します。試験時だけ `monitor_runner.py --period-month YYYY-MM --content-month YYYY-MM` で固定月を指定できます。対象外月のクラバト、`NGワード` シートに登録された他ゲーム・イベント動画は、スプレッドシート・Discordキューへ登録しません。
+
+YouTubeキーワード検索は3つの独立した5分ジョブで候補を収集し、別の5分ジョブで候補を統合して一度だけSheets・Discordへ反映します。候補は共有ランタイムの `youtube-search-candidates` にソース別スナップショットとして保存し、12分より古い候補は統合時に使いません。各実行の候補・所要時間・エラーは同ディレクトリの `history/<source>-YYYYMMDD.jsonl` に、ソース間の候補差分は共有ランタイムの `youtube_search_comparison.jsonl` に残ります。検索ジョブはSheetsやDiscordへ書き込まないため、互いに競合しません。代替経路の投稿日は検索カードにない場合があるため、候補の期間は統合処理で再確認します。
+
+キーワード検索では、検索したボス名（表記ゆれの登録がある場合はその別名）が動画タイトルにない候補を除外します。さらにタイトルにプリコネ表記、クラバト形式（段階・ボス・TL・UB等）、またはダメージ値がなければ除外し、検索語が偶然一致した別ジャンル動画を拾いにくくします。`NGワード` シートの語句はタイトル・概要欄・タグ全体に照合し、全角半角、空白、句読点の違いを吸収します。ゲーム名の略称や今回確認した焼肉・飲食店経営、Warhammer・プラモデル系の語も標準NG語に含めています。登録チャンネル巡回は検索対象ボスが固定されないため、このボス名必須条件は適用しません。
+
+登録済みチャンネルの定期巡回は引き続きチャンネルIDを起点にし、RSSを先に使い、保持件数や失敗時はyt-dlpへ切り替えます。キーワード検索で初めて見つけたチャンネルは、いずれかの検索経路で候補になり、統合処理のNG・期間・関連性判定を通った時点で登録します。
 
 `YouTube動画` タブには、動画備考・概要欄・TL整形・投稿直前本文も保存します。RSSの簡易情報から概要欄を取得できない場合は、不完全な行やDiscord投稿を作成せず、その動画を保留してログに不足理由を出します。
 
@@ -113,6 +128,9 @@ python monitor_runner.py
 
 ```sh
 python monitor_runner.py --stages youtube-search
+python monitor_runner.py --stages youtube-search-ytdlp
+python monitor_runner.py --stages youtube-search-pytubefix
+python monitor_runner.py --stages youtube-search-direct
 python monitor_runner.py --stages youtube-channel,worrychefs
 ```
 

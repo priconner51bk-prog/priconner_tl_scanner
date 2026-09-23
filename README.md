@@ -48,6 +48,9 @@ python monitor_runner.py
 個別ステージを実行する場合:
 
 ```sh
+python monitor_runner.py --stages youtube-search-ytdlp
+python monitor_runner.py --stages youtube-search-pytubefix
+python monitor_runner.py --stages youtube-search-direct
 python monitor_runner.py --stages youtube-search
 python monitor_runner.py --stages discord-channel
 python monitor_runner.py --stages worrychefs
@@ -59,7 +62,7 @@ python monitor_runner.py --stages youtube-channel
 固定月を使う試験例:
 
 ```sh
-python monitor_runner.py --stages youtube-search --period-month 2026-08 --content-month 2026-08
+python monitor_runner.py --stages youtube-search-ytdlp,youtube-search-pytubefix,youtube-search-direct,youtube-search --period-month 2026-08 --content-month 2026-08
 ```
 
 ## 主要な設定

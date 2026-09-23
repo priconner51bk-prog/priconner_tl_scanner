@@ -2,6 +2,7 @@ beautifulsoup4
 gspread
 oauth2client
 yt-dlp[default]
+pytubefix
 requests
 google-api-python-client
 google-auth
