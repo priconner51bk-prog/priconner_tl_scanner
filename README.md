@@ -66,6 +66,7 @@ python monitor_runner.py --stages youtube-search --period-month 2026-08 --conten
 
 - `config.ini.org` を `config.ini` にコピーして、Google Sheets・Discord・監視期間を設定する。
 - `config.ini`、`.env`、認証JSON、`discord_channels.json`、実行状態はGit管理外に置く。
+- YouTube URLの登録はスプレッドシートのApps Script APIを使う。共有トークンを `YOUTUBE_URL_API_TOKEN`（`.env`）またはローカルの `[youtube] url_api_token` に設定する。メインのダメージシートに未登録のURLを実験サーバーの「新着tl情報」にも送信する。
 - YouTubeの公開対象月は、通常はJSTの当月を自動使用する。試験時だけ `--period-month YYYY-MM` と `--content-month YYYY-MM` で対象月を指定できる。
 - YouTubeは当月の公開日時と内容月を基準にし、対象外月のクラバト表記、他ゲーム、SP・イベント動画は取得しない。追加の除外語は「プリコネTL新着」の `NGワード` シートで管理する。
 - `PRICONNER_YOUTUBE_BOSS_INDEX=1`〜`5` で検索対象ボスを限定できる。チャンネル監視を併用する場合は `PRICONNER_ALLOW_SHARED_CHANNEL_SCAN=1` が必要。

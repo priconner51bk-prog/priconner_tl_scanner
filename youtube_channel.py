@@ -23,6 +23,8 @@ from youtube_common import (
     build_youtube_post,
     effective_content_month,
     is_in_youtube_period,
+    log_youtube_registration_results,
+    post_new_url_to_experimental,
     video_metadata_fields,
     video_post_body,
     write_urls_with_retry,
@@ -30,6 +32,7 @@ from youtube_common import (
 )
 from youtube_rss import RSSChannel
 from youtube_storage import ensure_video_headers, persist_rows
+from youtube_url_api import register_urls
 
 URL_YOUTUBE_CHANNEL = "https://www.youtube.com/channel/"
 # Keep both channel requests and Discord posts serialized.  Discord also has
@@ -597,10 +600,12 @@ def checkNewArrivalsForYouTube(
 
         sleep(wait_time)
 
+    registration_results = []
     try:
-        _write_urls_with_retry(write_urls, damage_urls, sleep)
+        registration_results = _write_urls_with_retry(write_urls, damage_urls, sleep)
     except Exception as error:
         print(f"失敗: YouTube URL登録: {error}")
+    newly_registered = log_youtube_registration_results(registration_results)
 
     limit = 1 if os.environ.get("PRICONNER_FORCE_NEW_LIMIT_ONE") else int(os.environ.get("PRICONNER_FORCE_POST_LIMIT", "0") or 0)
     post_items = pending_posts[:limit] if limit else pending_posts
@@ -614,6 +619,11 @@ def checkNewArrivalsForYouTube(
             )
             item_content = post_tracker.post_content({**item, "text": body})
             dedupe_key = f"youtube-new:{item['url']}" if item.get("status") == "new" else None
+            if item["url"] in newly_registered:
+                try:
+                    post_new_url_to_experimental(item, item_content)
+                except Exception as error:
+                    print(f"失敗: 実験サーバー新着TL通知 {item['url']}: {error}")
             _post_configured(
                 post,
                 item_content,
@@ -654,29 +664,8 @@ def checkNewArrivalsForYouTube(
 
 
 def write_urls_to_youtube_sheet(urls):
-    """
-    url_list: ["https://youtu.be/...", ...] を想定
-    A列のうち「空セル」の行に順番に書き込む。
-    1行目はヘッダ想定なので 2 行目以降を対象。
-    """
-    if isinstance(urls, str):
-        urls = [urls]
-    urls = list(dict.fromkeys(url for url in urls if url))
-    if not urls:
-        return
-
-    # スプレッドシート取得
-    ss = gspread.getDamagesSheet()
-    sheet = ss.worksheet("Youtube")
-
-    # A partially completed prior write must not create a duplicate URL when
-    # this operation is retried.
-    existing_urls = gspread.existing_column_values(sheet, 1)
-    urls = [url for url in urls if url not in existing_urls]
-    if not urls:
-        return
-
-    gspread.writeToFirstEmptyCells(sheet, urls, wait_time=WAIT_TIME)
+    """Register discovered videos through the spreadsheet's idempotent API."""
+    return register_urls(urls)
 
 
 def main():

@@ -19,6 +19,10 @@ tl_formatter_path=
 [youtube]
 period_days=7
 search_limit=20
+url_api_url=https://script.google.com/macros/s/AKfycbzwK2LiHtGCorTAmaJ3S4rMMTGnxSLEuxvNQgupVzI83Hj8KW44MfX0T0siZMBl1K9_2Q/exec
+url_api_timeout=20
+# Add url_api_token here locally, or set YOUTUBE_URL_API_TOKEN in .env.
+url_api_token=
 
 [monitor]
 runtime_dir=

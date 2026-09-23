@@ -61,6 +61,52 @@ def unique_urls(urls):
     return list(dict.fromkeys(url for url in urls if url))
 
 
+def unregistered_youtube_urls(registration_results):
+    """Return URLs not yet registered in the main damage sheet."""
+    if not isinstance(registration_results, (list, tuple)):
+        return set()
+    return {
+        item.get("url")
+        for item in registration_results
+        if isinstance(item, dict)
+        and item.get("status") in {"accepted", "already_queued"}
+        and not item.get("registered", False)
+    }
+
+
+def log_youtube_registration_results(registration_results):
+    """Log API insertions and duplicates with their returned sheet row."""
+    results = registration_results if isinstance(registration_results, (list, tuple)) else []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url", "")
+        status = item.get("status")
+        if status == "accepted":
+            print(f"YouTube URL登録: 行{item.get('row')} {url}")
+        elif status in {"already_registered", "already_queued"}:
+            print(f"YouTube URL重複: 行{item.get('row')} {url}")
+        elif status == "error":
+            print(f"失敗: YouTube URL登録 {url}: {item.get('error', 'API error')}")
+    return unregistered_youtube_urls(results)
+
+
+def post_new_url_to_experimental(item, body):
+    """Queue a newly registered YouTube video in the experimental arrivals channel."""
+    import discord_utils
+
+    url = str(item.get("url") or "").strip()
+    if not url:
+        return []
+    return discord_utils.post_to_configured_guilds(
+        body,
+        channel_key="summary",
+        guild_keys=["experimental"],
+        dedupe_key=f"youtube-new-experimental:{url}",
+        summary_author=item.get("summary_author", ""),
+    )
+
+
 VIDEO_HEADERS = [
     "チャンネル名", "チャンネルURL", "投稿日", "動画タイトル", "動画URL",
     "動画備考", "概要欄", "TL整形", "投稿直前本文",
