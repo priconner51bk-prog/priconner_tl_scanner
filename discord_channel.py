@@ -365,6 +365,9 @@ def _summary_item_status(item):
     if status:
         return status
     content = str(item.get("content") or item.get("text") or "")
+    match = re.search(r"(?m)^\s*状態:\s*(新規|更新)\s*$", content)
+    if match:
+        return "updated" if match.group(1) == "更新" else "new"
     return "updated" if "【差分】" in content or "更新" in content else "new"
 
 
@@ -374,6 +377,9 @@ def _summary_item_title(item):
         return title
     content = str(item.get("content") or item.get("text") or "")
     match = re.search(r"(?m)^\s*(?:\+\s*)?動画タイトル:\s*(.+?)\s*$", content)
+    if match:
+        return match.group(1)
+    match = re.search(r"(?m)^\s*\[WorryChefs更新\]\s*(.+?)\s*$", content)
     return match.group(1) if match else ""
 
 
@@ -382,8 +388,16 @@ def _summary_item_author(item):
     if author:
         return _summary_title(author)
     content = str(item.get("content") or item.get("text") or "")
-    match = re.search(r"(?m)^\s*(?:\+\s*)?投稿者:\s*(.+?)\s*$", content)
+    match = re.search(r"(?m)^\s*制作者:\s*(.+?)(?:\s*/\s*ダメージ:.*)?\s*$", content)
+    if not match:
+        match = re.search(r"(?m)^\s*(?:\+\s*)?投稿者:\s*(.+?)\s*$", content)
     return _summary_title(match.group(1)) if match else "（不明）"
+
+
+def _summary_item_damage(item):
+    content = str(item.get("content") or item.get("text") or "")
+    match = re.search(r"(?m)(?:^|/)\s*ダメージ:\s*([^/\r\n]+)", content)
+    return _summary_title(match.group(1)) if match else ""
 
 
 def _summary_body_excerpt(item, limit=30):
@@ -456,11 +470,15 @@ def _build_post_summary(items):
         for item in group["items"]:
             title = _summary_title(_summary_item_title(item))
             author = _summary_item_author(item)
+            damage = _summary_item_damage(item)
+            content = str(item.get("content") or item.get("text") or "")
+            author_label = "制作者" if "[WorryChefs更新]" in content else "投稿者"
+            details = f" / ダメージ: {damage}" if damage else ""
             if title:
-                lines.append(f"- タイトル: {title} / 投稿者: {author}")
+                lines.append(f"- タイトル: {title} / {author_label}: {author}{details}")
             else:
                 excerpt = _summary_body_excerpt(item) or "（本文なし）"
-                lines.append(f"- 本文: {excerpt} / 投稿者: {author}")
+                lines.append(f"- 本文: {excerpt} / {author_label}: {author}{details}")
 
     summary = "\n".join(lines)
     # Discord rejects messages over 2000 characters. Keep the per-boss counts

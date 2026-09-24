@@ -501,10 +501,14 @@ def _split_text_lines(text, limit):
 
 def build_worrychefs_split_messages(record, post_text, detected_at, limit=1950):
     """Build attachment-free messages for TL bodies exceeding Discord's limit."""
+    author = record.get("author") or "不明"
+    damage = record.get("damage") or "未記入"
     header = (
         f"[WorryChefs更新] {record['code']} ({record['source']})\n"
+        f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
         f"更新検知日時: {detected_at if record.get('status') == 'updated' else ''}\n"
         f"参照: {record['url']}\n"
+        f"制作者: {author} / ダメージ: {damage}\n"
         "TL本文（分割）\n"
     )
     payload_limit = max(100, limit - len(header) - 32)
@@ -537,6 +541,7 @@ def build_worrychefs_content(record, post_text, detected_at, limit=1950):
     rendered_post = _render_post_text(record, post_text)
     full = (
         f"[WorryChefs更新] {code} ({source})\n"
+        f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
         f"新規投稿日時: {record.get('first_seen', detected_at)}\n"
         f"更新検知日時: {detected_at if record.get('status') == 'updated' else ''}\n"
         f"参照スプシ: [シートを開く]({url})\n"
@@ -549,21 +554,28 @@ def build_worrychefs_content(record, post_text, detected_at, limit=1950):
         full + formation,
         (
             f"[WorryChefs更新] {code} ({source})\n"
+            f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
             f"参照スプシ: [シートを開く]({url})\n"
             f"制作者: {author} / ダメージ: {damage}\n\n"
             f"{rendered_post}" + formation
         ),
         (
             f"[WorryChefs更新] {code} ({source})\n"
+            f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
             f"参照: {url}\n"
+            f"制作者: {author} / ダメージ: {damage}\n\n"
             f"{rendered_post}"
         ),
         (
             f"[WorryChefs更新] {code} ({source})\n"
+            f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
+            f"ダメージ: {damage}\n\n"
             f"{rendered_post}" + formation
         ),
         (
             f"[WorryChefs更新] {code}\n"
+            f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
+            f"ダメージ: {damage}\n\n"
             f"{rendered_post}" + formation
         ),
     ]
