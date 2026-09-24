@@ -217,6 +217,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 *.json
+!worrychefs_sources.json
 config.ini
 SECRET_INVENTORY.local.md
 secrets.local.json

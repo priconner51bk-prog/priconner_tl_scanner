@@ -1,0 +1,12 @@
+{
+  "spreadsheet_id": "2PACX-1vQoyEiwcXwj281hetXlJTwicXdU8efilfmGfOLYsy7UjQkwWXfiHl9xZiN6v_vUq8XJ0m1pLYxz8-2I",
+  "sources": [
+    {"name": "simple", "gid": "1391911131"},
+    {"name": "overtime", "gid": "835537673"},
+    {"name": "manual-d1", "gid": "1305029905"},
+    {"name": "manual-d2", "gid": "1699807028"},
+    {"name": "manual-d3", "gid": "1464210928"},
+    {"name": "manual-d4", "gid": "2047017564"},
+    {"name": "manual-d5", "gid": "311078222"}
+  ]
+}
