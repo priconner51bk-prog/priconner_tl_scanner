@@ -12,6 +12,7 @@
 | `PriconnerClanBattle-priconner_tl_scanner-youtube-search-pytubefix` | pytubefix候補収集 | 5分 | 12:03〜 |
 | `PriconnerClanBattle-priconner_tl_scanner-youtube-search-direct` | YouTube直検索候補収集 | 5分 | 12:04〜 |
 | `PriconnerClanBattle-priconner_tl_scanner-youtube-search` | 候補統合・Sheets/Discord反映 | 5分 | 12:05〜 |
+| `PriconnerClanBattle-priconner_tl_scanner-worrychefs` | WorryChefs収集・Sheets/Discord反映 | 15分 | 12:06〜 |
 | `PriconnerClanBattle-priconner_tl_scanner-discord-channel` | Discordチャンネル収集 | 5分 | 12:01〜 |
 
 ```powershell
@@ -102,7 +103,7 @@ Get-ScheduledTask -TaskPath '\' |
   Where-Object TaskName -like 'PriconnerClanBattle-*'
 ```
 
-収集ステージは内部の処理単位です。中央スケジューラーにはYouTubeチャンネル収集、3つの検索候補収集、候補統合、Discordチャンネル収集を個別ジョブとして登録し、それぞれ異なる間隔で実行します。候補収集は毎5分、1分ずつ開始時刻をずらし、最後に候補統合を実行します。各ジョブは中央の `scheduler.py --run-job` を経由して `monitor_runner.py` を起動します。
+収集ステージは内部の処理単位です。中央スケジューラーにはYouTubeチャンネル収集、3つの検索候補収集、候補統合、WorryChefs収集、Discordチャンネル収集を個別ジョブとして登録し、それぞれ異なる間隔で実行します。候補収集は毎5分、1分ずつ開始時刻をずらし、最後に候補統合を実行します。各ジョブは中央の `scheduler.py --run-job` を経由して `monitor_runner.py` を起動します。
 
 YouTube登録チャンネルは、最新動画投稿日から `maintenance.inactive_days` 日を超えると通常走査を省略します。そのチャンネルの動画がYouTube検索で見つかった場合は、検索結果を保存し、最新投稿日を更新します。
 
