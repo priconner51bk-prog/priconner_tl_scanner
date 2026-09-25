@@ -223,4 +223,5 @@ SECRET_INVENTORY.local.md
 secrets.local.json
 # Runtime output artifacts
 7/
+days/
 _docs_cli.html

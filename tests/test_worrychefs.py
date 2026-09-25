@@ -141,6 +141,18 @@ def test_compare_tl_records_detects_new_and_changed_only():
     assert [item["key"] for item in changed] == ["simple:D101"]
 
 
+def test_compare_tl_records_uses_stored_formatted_body_before_reformatting(monkeypatch):
+    text = "0:43 シオリ [5---1] ノゾミ & シオリ , 🅰️OFF"
+    monkeypatch.setattr(
+        worrychefs, "format_tl_text",
+        lambda _text: "0:43 シオリ [5---1] ノゾミ & シオリ ,",
+    )
+    record = {"key": "manual-d2:D20", "text": text, "hash": "new-hash"}
+    rows = [worrychefs.TL_HEADERS, ["manual-d2:D20", text, "old-hash"]]
+
+    assert worrychefs.compare_tl_records(rows, [record]) == []
+
+
 def test_prepare_sheet_changes_preserves_first_seen_for_updates():
     record = {"key": "simple:D101", "text": "new", "hash": "h2", "source": "simple", "url": "u"}
     header, inserts, updates = worrychefs.prepare_sheet_changes(

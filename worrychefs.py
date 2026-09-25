@@ -600,11 +600,13 @@ def compare_tl_records(rows, records):
             # were translated.  Compare normalized visible text as a migration
             # fallback so a name translation alone is not a full update.
             old_text = old[1] if len(old) > 1 else ""
+            current_normalized = canonicalize_tl(record.get("text", ""))
+            if canonicalize_tl(old_text) == current_normalized:
+                continue
             try:
                 old_normalized = canonicalize_tl(format_tl_text(old_text))
             except (requests.RequestException, RuntimeError, KeyError, ValueError):
                 old_normalized = canonicalize_tl(old_text)
-            current_normalized = canonicalize_tl(record.get("text", ""))
             if old_normalized == current_normalized:
                 continue
             record["status"] = "updated"
@@ -713,13 +715,6 @@ def apply_alternating_post_modes(records, sheet_rows):
     return counts
 
 
-def format_previous_post_text(record):
-    """Normalize the stored old body before rendering an update diff."""
-    if record.get("status") == "updated" and record.get("previous_text"):
-        record["previous_text"] = format_tl_text(record["previous_text"])
-    return record
-
-
 def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
                                format_time=datetime.dateTime2String,
                                reset_discord=False, target_code=None, source_kind=None,
@@ -790,8 +785,6 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
     if alternate_new_update:
         counts = apply_alternating_post_modes(selected_records, sheet_rows)
         print(f"交互投稿計画: 新規{counts['new']}件 更新{counts['updated']}件")
-    for record in selected_records:
-        format_previous_post_text(record)
     for record in records:
         if os.environ.get("PRICONNER_NO_POST"):
             continue
