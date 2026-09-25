@@ -200,6 +200,25 @@ def test_build_worrychefs_split_messages_does_not_use_attachments():
     assert all(len(message) <= 500 for message in messages)
 
 
+def test_build_worrychefs_content_keeps_source_link_in_compact_versions():
+    url = "https://docs.google.com/spreadsheets/d/e/current-month/pubhtml/sheet?gid=123"
+    record = {
+        "code": "D102",
+        "source": "simple",
+        "url": url,
+        "status": "updated",
+        "author": "g8",
+        "damage": "378.5m",
+        "first_seen": "2026/09/01",
+        "formation_md": "formation details",
+    }
+
+    content = worrychefs.build_worrychefs_content(record, "TL本文", "2026/09/25", 180)
+
+    assert content is not None
+    assert url in content
+
+
 def test_build_formation_attachment_uses_png_not_markdown(monkeypatch):
     record = {
         "code": "D443",

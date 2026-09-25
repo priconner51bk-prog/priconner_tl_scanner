@@ -569,12 +569,14 @@ def build_worrychefs_content(record, post_text, detected_at, limit=1950):
         (
             f"[WorryChefs更新] {code} ({source})\n"
             f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
+            f"参照: {url}\n"
             f"ダメージ: {damage}\n\n"
             f"{rendered_post}" + formation
         ),
         (
             f"[WorryChefs更新] {code}\n"
             f"状態: {'更新' if record.get('status') == 'updated' else '新規'}\n"
+            f"参照: {url}\n"
             f"ダメージ: {damage}\n\n"
             f"{rendered_post}" + formation
         ),

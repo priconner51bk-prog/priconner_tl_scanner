@@ -400,6 +400,18 @@ def _summary_item_damage(item):
     return _summary_title(match.group(1)) if match else ""
 
 
+def _summary_worrychefs_sheet_link(item):
+    content = str(item.get("content") or item.get("text") or "")
+    if "[WorryChefs更新]" not in content:
+        return ""
+    match = re.search(
+        r"(?m)^\s*(?:参照スプシ:\s*\[[^\]]+\]\(|参照:\s*)"
+        r"(https://docs\.google\.com/spreadsheets/[^\s)]+)",
+        content,
+    )
+    return f"[シートを開く]({match.group(1)})" if match else ""
+
+
 def _summary_body_excerpt(item, limit=30):
     content = str(item.get("content") or item.get("text") or "")
     match = re.search(r"(?m)^\s*Discord投稿本文:\s*(.*)$", content)
@@ -454,6 +466,10 @@ def _build_post_summary(items):
         ]
     if result_counts.get("未送信"):
         lines[0] += f" / 未送信{result_counts['未送信']}件"
+    sheet_links = dict.fromkeys(
+        link for item in items if (link := _summary_worrychefs_sheet_link(item))
+    )
+    lines.extend(f"参照スプシ: {link}" for link in sheet_links)
 
     for channel_key in ordered_keys:
         group = groups[channel_key]

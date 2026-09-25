@@ -80,3 +80,62 @@ def test_post_summary_can_read_the_exact_queued_message_body():
     assert "状態: 新規1件 / 更新1件" in summary
     assert "種別: YouTube1件 / Discord本文1件" in summary
     assert "- タイトル: キューから確認するTL / 投稿者: （不明）" in summary
+
+
+def test_post_summary_includes_worrychefs_source_sheet_link():
+    url = (
+        "https://docs.google.com/spreadsheets/d/e/current-month/"
+        "pubhtml/sheet?headers=false&gid=1391911131"
+    )
+    summary = discord_channel._build_post_summary(
+        [
+            {
+                "channel_key": "boss1_tl",
+                "content": (
+                    "[WorryChefs更新] D102 (simple)\n"
+                    "状態: 更新\n"
+                    f"参照スプシ: [シートを開く]({url})\n"
+                    "制作者: g8 / ダメージ: 378.5m"
+                ),
+            }
+        ]
+    )
+
+    assert "- タイトル: D102 (simple) / 制作者: g8 / ダメージ: 378.5m" in summary
+    assert f"参照スプシ: [シートを開く]({url})" in summary
+
+
+def test_post_summary_includes_short_worrychefs_source_sheet_link():
+    url = "https://docs.google.com/spreadsheets/d/e/current-month/pubhtml/sheet?gid=123"
+    summary = discord_channel._build_post_summary(
+        [{"channel_key": "boss1_tl", "content": f"[WorryChefs更新] D102\n参照: {url}"}]
+    )
+
+    assert f"参照スプシ: [シートを開く]({url})" in summary
+
+
+def test_post_summary_shows_each_worrychefs_sheet_link_once():
+    shared_url = "https://docs.google.com/spreadsheets/d/e/month/pubhtml/sheet?gid=1"
+    other_url = "https://docs.google.com/spreadsheets/d/e/month/pubhtml/sheet?gid=2"
+    summary = discord_channel._build_post_summary(
+        [
+            {
+                "channel_key": "boss1_tl",
+                "content": (
+                    "[WorryChefs更新] D101 (simple)\n"
+                    f"参照スプシ: [シートを開く]({shared_url})"
+                ),
+            },
+            {
+                "channel_key": "boss2_tl",
+                "content": f"[WorryChefs更新] D201 (simple)\n参照: {shared_url}",
+            },
+            {
+                "channel_key": "boss2_tl",
+                "content": f"[WorryChefs更新] D202 (manual-d2)\n参照: {other_url}",
+            },
+        ]
+    )
+
+    assert summary.count(f"参照スプシ: [シートを開く]({shared_url})") == 1
+    assert summary.count(f"参照スプシ: [シートを開く]({other_url})") == 1
