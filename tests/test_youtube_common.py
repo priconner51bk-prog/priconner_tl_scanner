@@ -1,10 +1,10 @@
+from unittest.mock import patch
+
 from post_change_tracker import (
     POST_SEPARATOR,
     markdown_note_line,
     suppress_discord_embeds,
 )
-from unittest.mock import patch
-
 from youtube_common import (
     VIDEO_HEADERS,
     build_video_sheet_row,

@@ -29,7 +29,7 @@ def test_find_youtube_video_records_new_video_and_channel():
     now = datetime(2026, 9, 10, tzinfo=timezone.utc)
     video = SimpleNamespace(
         watch_url="https://www.youtube.com/watch?v=new",
-        title="プリコネ クラバト 4段階目 TL",
+        title="BossA プリコネ クラバト 4段階目 TL",
         description="Priconne TL video",
         tags=["tl"],
         publish_date=now - timedelta(hours=1),

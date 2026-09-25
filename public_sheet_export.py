@@ -7,15 +7,14 @@ as an injectable processor until the source layout is finalized.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import io
-import argparse
 import os
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 import requests
-
 
 DEFAULT_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
 Row = list[str]

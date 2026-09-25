@@ -27,7 +27,6 @@ import youtube_handoff
 import youtube_url_api
 from discord_queue import queue_path
 
-
 JST = ZoneInfo("Asia/Tokyo")
 DEFAULT_START = "2026-09-22T12:00:00+09:00"
 DEFAULT_END = "2026-09-30T00:00:00+09:00"

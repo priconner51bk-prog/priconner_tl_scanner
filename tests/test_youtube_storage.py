@@ -1,5 +1,5 @@
-from youtube_storage import ensure_video_headers
 from youtube_common import VIDEO_HEADERS
+from youtube_storage import ensure_video_headers
 
 
 class FakeSheet:

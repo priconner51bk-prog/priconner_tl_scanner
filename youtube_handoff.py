@@ -8,7 +8,6 @@ from pathlib import Path
 
 from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 
-
 QUEUE_FILENAME = "youtube_url_handoff.json"
 HANDOFF_PATH_ENV = "PRICONNER_YOUTUBE_HANDOFF_PATH"
 YOUTUBE_ID_PATTERN = re.compile(

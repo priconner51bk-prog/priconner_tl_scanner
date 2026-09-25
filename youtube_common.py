@@ -1,18 +1,18 @@
 """Shared helpers for YouTube search and channel scanners."""
 
-import time
 import os
+import time
 from datetime import datetime as DateTime
 from datetime import timedelta, timezone
 
 import datetime_utils as datetime
-from tl_formatting import format_discord_tl
 from post_change_tracker import (
     POST_SEPARATOR,
     add_post_separator,
     markdown_note_line,
     suppress_discord_embeds,
 )
+from tl_formatting import format_discord_tl
 
 
 def as_utc(value):

@@ -8,7 +8,6 @@ import requests
 import gspread_utils as gspread
 from youtube_common import unique_urls
 
-
 DEFAULT_API_URL = (
     "https://script.google.com/macros/s/"
     "AKfycbzwK2LiHtGCorTAmaJ3S4rMMTGnxSLEuxvNQgupVzI83Hj8KW44MfX0T0siZMBl1K9_2Q/exec"

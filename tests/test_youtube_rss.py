@@ -1,9 +1,6 @@
 from datetime import timezone
 
-import pytest
-
 from youtube_rss import RSSChannel
-
 
 FEED = b'''<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">
 <title>Example Channel</title><entry><yt:videoId>abc123</yt:videoId><title>Hello</title><published>2026-09-20T00:00:00+00:00</published></entry></feed>'''

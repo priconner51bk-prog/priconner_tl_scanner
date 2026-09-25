@@ -69,16 +69,16 @@ python discord_queue.py
 
 ## 4. 状態・失敗確認
 
-既定の状態保存先は次のとおりです。
+既定の状態保存先は次のとおりです。中央スケジューラーが単一ステージを起動する場合、最新の状態はステージ名のサブディレクトリに保存されます。ルート直下の `state.json` は複数ステージをまとめて実行した場合の状態であり、単一ステージの実行では更新されません。
 
 ```text
-%USERPROFILE%\.local\state\priconner-tl-scanner\state.json
+%USERPROFILE%\.local\state\priconner-tl-scanner\<ステージ名>\state.json
 ```
 
 確認:
 
 ```powershell
-Get-Content "$env:USERPROFILE\.local\state\priconner-tl-scanner\state.json"
+Get-Content "$env:USERPROFILE\.local\state\priconner-tl-scanner\worrychefs\state.json"
 ```
 
 中央スケジューラーのログと状態は次の場所です。
