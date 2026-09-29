@@ -49,4 +49,14 @@ def test_rejects_clan_battle_final_day_live_stream_title():
         DEFAULT_NG_TERMS,
         "2026-09",
     )
-    assert reason == "NGワード: 最終日配信"
+    assert reason == "NGワード: 配信"
+
+
+def test_rejects_boss_damage_streaming_slot_title():
+    reason = clan_battle_filter_reason(
+        video("【プリコネ】フロストハウンドを伸ばす枠"),
+        ["フロストハウンド"],
+        DEFAULT_NG_TERMS,
+        "2026-09",
+    )
+    assert reason == "NGワード: 伸ばす枠"
