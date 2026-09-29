@@ -88,6 +88,7 @@ DEFAULT_NG_TERMS = (
     "valorant",
     "minecraft",
     "イベント攻略",
+    "深淵討伐戦",
     "復刻SP",
     "総力戦",
 )

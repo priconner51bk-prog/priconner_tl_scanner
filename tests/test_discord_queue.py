@@ -88,6 +88,7 @@ def test_queued_post_items_filters_by_run_and_excludes_notifications(tmp_path):
         channel_key="boss2_tl",
         guild_keys=["production"],
         summary_author="YouTubeチャンネル",
+        summary_change="削除「旧」 / 追加「新」",
         path=db_path,
     )
     discord_queue.enqueue_for_guilds(
@@ -100,6 +101,7 @@ def test_queued_post_items_filters_by_run_and_excludes_notifications(tmp_path):
     assert [item["content"] for item in items] == ["post"]
     assert items[0]["channel_key"] == "boss2_tl"
     assert items[0]["summary_author"] == "YouTubeチャンネル"
+    assert items[0]["summary_change"] == "削除「旧」 / 追加「新」"
 
 
 def test_drain_cleans_old_history_but_keeps_active_items(tmp_path, monkeypatch):

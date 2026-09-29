@@ -82,6 +82,26 @@ def test_post_summary_can_read_the_exact_queued_message_body():
     assert "- タイトル: キューから確認するTL / 投稿者: （不明）" in summary
 
 
+def test_updated_discord_summary_shows_only_original_message_change():
+    previous = (
+        "検出日時: 2026/09/25 15:06:02\n"
+        "Discord投稿本文: 0:05 チエル 〇〇－〇〇 “オートOFF”\n"
+        "投稿元リンク: https://discord.com/channels/guild/channel/message\n\n"
+        "TL（整形済み）:\n```scm\n0:05 チエル [54-21]🅰️OFF\n```"
+    )
+    change = discord_channel._summary_source_change(
+        previous, "0:05 チエル 〇〇－〇〇"
+    )
+    summary = discord_channel._build_post_summary([
+        {"channel_key": "boss2_tl", "status": "updated", "content": "【差分】", "summary_change": change}
+    ])
+
+    assert "変更点（元投稿）: 削除「0:05 チエル 〇〇-〇〇 “オートOFF”」" in summary
+    assert "追加「0:05 チエル 〇〇-〇〇」" in summary
+    assert "[54-21]" not in summary
+    assert "検出日時" not in summary
+
+
 def test_post_summary_includes_worrychefs_source_sheet_link():
     url = (
         "https://docs.google.com/spreadsheets/d/e/current-month/"

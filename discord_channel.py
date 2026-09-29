@@ -290,10 +290,12 @@ def _post_channel_key(content, source_boss=None):
     return f"boss{next(iter(bosses))}_tl" if len(bosses) == 1 else "boss0_tl"
 
 
-def _post_to_assigned_boss(post, content, source_boss=None):
+def _post_to_assigned_boss(post, content, source_boss=None, summary_change=None):
     if post is discord.post:
         return discord.post_to_configured_guilds(
-            content, channel_key=_post_channel_key(content, source_boss)
+            content,
+            channel_key=_post_channel_key(content, source_boss),
+            summary_change=summary_change,
         )
     return post(content)
 
@@ -311,15 +313,119 @@ def _is_non_content_discord_message(content):
     )
 
 
-def _tracking_status(was_known, old, previous, comparison):
+def _tracking_status(
+    was_known, old, previous, comparison, current_body=None, current_raw=None
+):
     """Classify material changes while migrating hashes from older formats."""
     if not old:
         return "same" if was_known else "new"
+    comparison = _discord_comparison_text(comparison)
+    old_row = old[1] if isinstance(old[1], (list, tuple)) else old
+    if len(old_row) > 8 and old_row[8]:
+        previous_comparison = _discord_comparison_text(old_row[8])
+    else:
+        previous_comparison = _discord_comparison_text(
+            _without_formatted_tl(previous)
+        )
+        if current_body is not None:
+            comparison = _discord_comparison_text(
+                _without_formatted_tl(current_body)
+            )
+            if previous_comparison != comparison and _same_truncated_source(
+                previous, current_body, current_raw
+            ):
+                return "same"
     return (
         "same"
-        if post_tracker.comparison_text(previous) == comparison
+        if previous_comparison == comparison
         else "updated"
     )
+
+
+def _without_formatted_tl(post_body):
+    """Remove the generated TL section from source-change comparisons."""
+    marker = "\n\nTL（整形済み）:\n```scm\n"
+    body, separator, formatted = str(post_body or "").partition(marker)
+    return body if separator and formatted.endswith("\n```") else str(post_body or "")
+
+
+def _discord_comparison_text(content):
+    """Compare source content without mutable Discord author display names."""
+    content = str(content or "")
+    metadata, marker, source = content.partition("Discord投稿本文:")
+    metadata = re.sub(
+        r"(?m)^[ \t]*投稿者:[^\r\n]*(?:\r?\n|$)", "", metadata
+    )
+    content = f"{metadata}{marker}{source}"
+    return post_tracker.comparison_text(content)
+
+
+def _same_truncated_source(previous, current, current_raw):
+    """Match a legacy clipped preview when only TL output changed its length."""
+    if current_raw is None:
+        return False
+    old_body = _without_formatted_tl(previous)
+    new_body = _without_formatted_tl(current)
+    marker = "Discord投稿本文: "
+    if marker not in old_body or marker not in new_body:
+        return False
+    old_prefix, old_raw = old_body.split(marker, 1)
+    new_prefix, new_raw = new_body.split(marker, 1)
+    old_link = old_raw.rpartition("\n投稿元リンク: ")
+    new_link = new_raw.rpartition("\n投稿元リンク: ")
+    if not old_link[1] or not new_link[1]:
+        return False
+    old_preview = old_link[0]
+    new_preview = new_link[0]
+
+    def matches_raw(preview):
+        if preview.endswith("…"):
+            return str(current_raw).startswith(preview[:-1].rstrip())
+        return preview == str(current_raw)
+
+    return (
+        (old_preview.endswith("…") or new_preview.endswith("…"))
+        and _discord_comparison_text(old_prefix) == _discord_comparison_text(new_prefix)
+        and old_link[2] == new_link[2]
+        and matches_raw(old_preview)
+        and matches_raw(new_preview)
+    )
+
+
+def _stored_discord_message_body(post_body):
+    """Read the original message section from a previously saved bot post."""
+    marker = "Discord投稿本文: "
+    if marker not in post_body:
+        return None
+    raw = post_body.split(marker, 1)[1]
+    source_link = raw.rfind("\n投稿元リンク: ")
+    if source_link >= 0:
+        raw = raw[:source_link]
+    else:
+        raw = raw.split("\n\nTL（整形済み）:", 1)[0]
+    return raw.strip()
+
+
+def _summary_source_change(previous_body, current_raw, max_lines=2, line_limit=90):
+    """Describe only changes in the original Discord message, not formatted TL."""
+    previous_raw = _stored_discord_message_body(previous_body)
+    if previous_raw is None:
+        return ""
+    changes = post_tracker.changed_lines(previous_raw, current_raw).splitlines()
+    if not changes:
+        return ""
+    shown = []
+    for change in changes[:max_lines]:
+        label, _, value = change.partition(": ")
+        value = _summary_title(value).replace("@", "@\u200b")
+        value = re.sub(r"([\\`*_~|])", r"\\\1", value)
+        if len(value) > line_limit:
+            value = value[: line_limit - 1].rstrip() + "…"
+        shown.append(f"{label}「{value}」")
+    remaining = len(changes) - len(shown)
+    if remaining:
+        shown.append(f"ほか{remaining}行")
+    return " / ".join(shown)
 
 
 def _notify_assigned_boss(notify, content):
@@ -495,6 +601,8 @@ def _build_post_summary(items):
             else:
                 excerpt = _summary_body_excerpt(item) or "（本文なし）"
                 lines.append(f"- 本文: {excerpt} / {author_label}: {author}{details}")
+            if _summary_item_status(item) == "updated" and item.get("summary_change"):
+                lines.append(f"  変更点（元投稿）: {item['summary_change']}")
 
     summary = "\n".join(lines)
     # Discord rejects messages over 2000 characters. Keep the per-boss counts
@@ -657,6 +765,9 @@ def checkNewArrivalsForDiscordChannel(
         now,
     )
     tracking_rows = tracking.get_all_values() if hasattr(tracking, "get_all_values") else []
+    if (tracking_rows and (len(tracking_rows[0]) < 9 or not tracking_rows[0][8])
+            and hasattr(tracking, "update")):
+        tracking.update("I1", [["比較元本文"]], value_input_option="USER_ENTERED")
     tracking_by_url = {row[0]: (i, row) for i, row in enumerate(tracking_rows[1:], start=2) if row and row[0]}
     processed_urls = set()
     new_urls = []
@@ -819,12 +930,19 @@ def checkNewArrivalsForDiscordChannel(
                         metadata, raw_message, source_link, formatted_tl
                     )
                 body = post_tracker.add_post_separator(body)
-                comparison = post_tracker.comparison_text(body)
+                source_body = post_tracker.add_post_separator(
+                    f"{fixed_body if is_youtube else metadata}\n"
+                    f"Discord投稿本文: {raw_message or '（本文なし）'}{source_link}"
+                )
+                comparison = _discord_comparison_text(source_body)
                 digest = hashlib.sha256(comparison.encode("utf-8")).hexdigest()
                 old = tracking_by_url.get(tracking_key)
                 previous = old[1][1] if old and len(old[1]) > 1 else ""
-                row = [tracking_key, body, digest, scan_time, scan_time if old else "", previous, channel_id, str(message.get("id") or "")]
-                status = _tracking_status(was_known, old, previous, comparison)
+                row = [
+                    tracking_key, body, digest, scan_time, scan_time if old else "",
+                    previous, channel_id, str(message.get("id") or ""), comparison,
+                ]
+                status = _tracking_status(was_known, old, previous, comparison, body, raw_message)
                 if os.environ.get("PRICONNER_FORCE_POST") and old:
                     status = "updated"
                 if (os.environ.get("PRICONNER_FORCE_NEW_POST")
@@ -834,6 +952,10 @@ def checkNewArrivalsForDiscordChannel(
                     if not old:
                         pending_tracking_inserts.append(row)
                     elif len(old[1]) < 3 or old[1][2] != digest:
+                        # Refresh comparison/hash schema without recording a
+                        # material update or replacing the prior posted text.
+                        row[4] = old[1][4] if len(old[1]) > 4 else ""
+                        row[5] = old[1][5] if len(old[1]) > 5 else ""
                         pending_tracking_updates.append((old[0], row))
                     continue
                 if old and not os.environ.get("PRICONNER_FORCE_NEW_POST"):
@@ -849,6 +971,19 @@ def checkNewArrivalsForDiscordChannel(
                     "title": video_title if is_youtube else "",
                     "status": status,
                     "previous_text": previous,
+                    "diff_previous_text": (
+                        _discord_comparison_text(old[1][8])
+                        if old and len(old[1]) > 8 and old[1][8]
+                        else _discord_comparison_text(_without_formatted_tl(previous))
+                    ),
+                    "diff_current_text": (
+                        comparison if old and len(old[1]) > 8 and old[1][8]
+                        else _discord_comparison_text(_without_formatted_tl(body))
+                    ),
+                    "summary_change": (
+                        _summary_source_change(previous, raw_message)
+                        if status == "updated" else ""
+                    ),
                 })
                 print(f"new: {source_url}")
         retry_sleep(wait_time)
@@ -857,7 +992,7 @@ def checkNewArrivalsForDiscordChannel(
         if hasattr(tracking, "batch_update"):
             tracking.batch_update(
                 [
-                    {"range": f"A{row_number}:H{row_number}", "values": [row]}
+                    {"range": f"A{row_number}:I{row_number}", "values": [row]}
                     for row_number, row in pending_tracking_updates
                 ],
                 raw=False,
@@ -866,7 +1001,7 @@ def checkNewArrivalsForDiscordChannel(
         elif hasattr(tracking, "update"):
             for row_number, row in pending_tracking_updates:
                 tracking.update(
-                    f"A{row_number}:H{row_number}",
+                    f"A{row_number}:I{row_number}",
                     [row],
                     value_input_option="USER_ENTERED",
                 )
@@ -913,6 +1048,7 @@ def checkNewArrivalsForDiscordChannel(
                 post,
                 post_tracker.post_content(item),
                 item.get("source_boss"),
+                item.get("summary_change"),
             )
             post_success += 1
             item["post_result"] = "成功"

@@ -232,6 +232,7 @@ def post_to_configured_guilds(
     guild_keys=None,
     dedupe_key=None,
     summary_author=None,
+    summary_change=None,
 ):
     from discord_queue import enqueue_for_guilds
 
@@ -243,6 +244,7 @@ def post_to_configured_guilds(
         files=files,
         dedupe_key=dedupe_key,
         summary_author=summary_author,
+        summary_change=summary_change,
     )
 
 

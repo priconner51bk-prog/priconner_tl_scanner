@@ -134,8 +134,12 @@ def post_content(record, content_key="text"):
     if record.get("status") != "updated" or record.get("force_full"):
         return current
     diff = git_diff_lines(
-        remove_detection_timestamp(remove_ub_arrow(record.get("previous_text", ""))),
-        remove_detection_timestamp(current),
+        remove_detection_timestamp(remove_ub_arrow(
+            record.get("diff_previous_text", record.get("previous_text", ""))
+        )),
+        remove_detection_timestamp(remove_ub_arrow(
+            record.get("diff_current_text", current)
+        )),
     )
     if diff:
         return f"【差分】\n{diff}\n\n【現行本文】\n{current}".strip()

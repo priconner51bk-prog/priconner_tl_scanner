@@ -1,6 +1,40 @@
 """Shared persistence helpers for RSS and keyword YouTube collectors."""
 
+import os
+import time
+from contextlib import ExitStack, contextmanager
+from pathlib import Path
+
+from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 from youtube_common import VIDEO_HEADERS
+
+
+def _channel_registry_lock_path():
+    shared_runtime = os.environ.get("PRICONNER_MONITOR_SHARED_RUNTIME_DIR", "").strip()
+    runtime_dir = Path(shared_runtime).expanduser() if shared_runtime else default_runtime_dir()
+    return runtime_dir / "youtube_channel_registry.lock"
+
+
+@contextmanager
+def _locked_channel_registry(wait_seconds=30):
+    """Serialize channel existence-check/inserts across collector processes."""
+    lock_path = _channel_registry_lock_path()
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        stack = ExitStack()
+        try:
+            stack.enter_context(acquire_lock(lock_path))
+        except LockBusy:
+            stack.close()
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+            continue
+        try:
+            yield
+        finally:
+            stack.close()
+        return
 
 
 def ensure_video_headers(sheet_video):
@@ -20,19 +54,21 @@ def persist_rows(sheet_channel, sheet_video, channel_values, video_values):
     """Insert only new channel IDs and video URLs in one place."""
     ensure_video_headers(sheet_video)
     if channel_values:
-        existing_channels = {
-            row[1]
-            for row in sheet_channel.get_all_values()[1:]
-            if len(row) > 1 and row[1]
-        }
-        unique_channels = []
-        seen_channels = set(existing_channels)
-        for row in channel_values:
-            if len(row) > 1 and row[1] and row[1] not in seen_channels:
-                unique_channels.append(row)
-                seen_channels.add(row[1])
-        if unique_channels:
-            sheet_channel.insert_rows(unique_channels, row=2)
+        with _locked_channel_registry():
+            existing_channels = {
+                str(row[1]).strip()
+                for row in sheet_channel.get_all_values()[1:]
+                if len(row) > 1 and str(row[1]).strip()
+            }
+            unique_channels = []
+            seen_channels = set(existing_channels)
+            for row in channel_values:
+                channel_id = str(row[1] if len(row) > 1 else "").strip()
+                if channel_id and channel_id not in seen_channels:
+                    unique_channels.append(row)
+                    seen_channels.add(channel_id)
+            if unique_channels:
+                sheet_channel.insert_rows(unique_channels, row=2)
 
     if video_values:
         existing_videos = {

@@ -25,6 +25,7 @@ QUEUE_COLUMNS = (
     "kind",
     "content",
     "summary_author",
+    "summary_change",
     "status",
     "attempts",
     "available_at",
@@ -63,6 +64,7 @@ def _connect(path):
             kind TEXT NOT NULL DEFAULT 'post',
             content TEXT NOT NULL,
             summary_author TEXT,
+            summary_change TEXT,
             status TEXT NOT NULL DEFAULT 'queued',
             attempts INTEGER NOT NULL DEFAULT 0,
             available_at REAL NOT NULL,
@@ -87,6 +89,7 @@ def _connect(path):
         ("attachment_mime", "TEXT"),
         ("attachment_blob", "BLOB"),
         ("summary_author", "TEXT"),
+        ("summary_change", "TEXT"),
     ):
         if name not in columns:
             connection.execute(
@@ -110,6 +113,7 @@ def enqueue_for_guilds(
     files=None,
     path=None,
     summary_author=None,
+    summary_change=None,
 ):
     """Append one logical message for each fixed destination guild."""
     content = str(content or "")
@@ -142,9 +146,10 @@ def enqueue_for_guilds(
                 """
                 INSERT OR IGNORE INTO discord_queue
                     (dedupe_key, guild_key, channel_key, kind, content, summary_author,
+                     summary_change,
                      available_at, created_at, attachment_name, attachment_mime,
                      attachment_blob)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     key,
@@ -153,6 +158,7 @@ def enqueue_for_guilds(
                     kind,
                     content,
                     str(summary_author or ""),
+                    str(summary_change or ""),
                     now,
                     now,
                     attachment_name,
@@ -171,7 +177,7 @@ def queued_post_items(path=None, created_after=None):
     path = queue_path(path)
     with closing(_connect(path)) as connection:
         query = [
-            "SELECT dedupe_key, guild_key, channel_key, content, summary_author, created_at",
+            "SELECT dedupe_key, guild_key, channel_key, content, summary_author, summary_change, created_at",
             "FROM discord_queue",
             "WHERE status = 'queued' AND kind = 'post'",
         ]

@@ -161,7 +161,51 @@ def test_prepare_sheet_changes_preserves_first_seen_for_updates():
     )
     assert header[0] == "TLキー"
     assert inserts == []
-    assert updates == [(2, ["simple:D101", "new", "h2", "first", "now", "simple", "u", "old"])]
+    assert updates == [(2, ["simple:D101", "new", "h2", "first", "now", "simple", "u", "old", ""])]
+
+
+def test_formatter_relayout_is_not_a_worrychefs_update():
+    source = "1:30 OXOOO Auto OFF"
+    previous = "1:30 [-4-21]🅰️OFF"
+    current = "* [-4-21]🅰️OFF"
+    record = {
+        "key": "manual-d2:D20", "text": current, "hash": worrychefs.tl_hash(current),
+        "source": "manual-d2", "url": "https://example.test",
+        "source_comparison": source,
+    }
+    legacy_row = ["manual-d2:D20", previous, worrychefs.tl_hash(previous),
+                  "first", "last", "manual-d2", "https://example.test", "prior post"]
+    header, inserts, updates = worrychefs.prepare_sheet_changes(
+        [worrychefs.TL_HEADERS[:-1], legacy_row], [record], "now"
+    )
+
+    assert record.get("status") is None
+    assert inserts == []
+    assert header[-1] == "比較元本文"
+    assert updates == [(2, ["manual-d2:D20", current, record["hash"],
+                           "first", "last", "manual-d2", "https://example.test",
+                           "prior post", source])]
+
+    record = {**record, "text": "* [-4-21]🅰️OFF 変更", "hash": "another-hash"}
+    assert worrychefs.compare_tl_records([header, updates[0][1]], [record]) == []
+
+
+def test_worrychefs_source_change_still_reports_only_source_diff():
+    source = "1:30 OXOOO Auto OFF"
+    record = {
+        "key": "manual-d2:D20", "text": "* [-4-21]🅰️OFF 変更",
+        "hash": "new-format-hash", "source": "manual-d2", "url": "u",
+        "source_comparison": "1:30 OXOOO Auto ON",
+    }
+    old_row = ["manual-d2:D20", "1:30 [-4-21]🅰️OFF", "old-hash",
+               "first", "last", "manual-d2", "u", "prior post", source]
+
+    assert worrychefs.compare_tl_records([worrychefs.TL_HEADERS, old_row], [record]) == [record]
+    assert record["status"] == "updated"
+    post = worrychefs.post_tracker.post_content(record)
+    assert "- 1:30 OXOOO Auto OFF" in post
+    assert "+ 1:30 OXOOO Auto ON" in post
+    assert "- 1:30 [-4-21]" not in post
 
 
 def test_record_matches_month_treats_target_as_trial_snapshot_label():

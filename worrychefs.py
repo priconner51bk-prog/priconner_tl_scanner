@@ -39,7 +39,7 @@ def tl_hash(text):
 
 TL_HEADERS = [
     "TLキー", "TL本文", "TLハッシュ", "新規検出日時", "更新検出日時",
-    "種別", "元シートURL", "投稿直前本文",
+    "種別", "元シートURL", "投稿直前本文", "比較元本文",
 ]
 
 _character_aliases_cache = None
@@ -414,6 +414,7 @@ def collect_worrychefs_records(sources, http_get=requests.get, timeout=10,
         for block in extract_tl_blocks(rows, source["name"]):
             if not validate_tl_record(block):
                 continue
+            source_text = block["text"]
             block["text"] = format_tl_text(block["text"])
             block["canonical"] = canonicalize_tl(block["text"])
             block["hash"] = tl_hash(block["text"])
@@ -426,6 +427,9 @@ def collect_worrychefs_records(sources, http_get=requests.get, timeout=10,
             block["author"] = _source_author(rows, block["code"])
             block["comparison_text"] = post_tracker.comparison_text(
                 block["text"], block.get("formation_md"), block.get("author"), block.get("damage")
+            )
+            block["source_comparison"] = post_tracker.comparison_text(
+                source_text, block.get("formation_md"), block.get("author"), block.get("damage")
             )
             block["hash"] = tl_hash(block["comparison_text"])
             records.append(block)
@@ -595,6 +599,17 @@ def compare_tl_records(rows, records):
         old = existing.get(record["key"])
         if old is None:
             record["status"] = "new"
+        elif record.get("source_comparison") and len(old) > 8 and old[8]:
+            if canonicalize_tl(old[8]) == canonicalize_tl(record["source_comparison"]):
+                continue
+            record["status"] = "updated"
+            record["previous_text"] = old[1] if len(old) > 1 else ""
+            record["diff_previous_text"] = old[8]
+            record["diff_current_text"] = record["source_comparison"]
+        elif record.get("source_comparison"):
+            # Older rows have no source snapshot. Bootstrap one without
+            # publishing a formatter migration as a content update.
+            continue
         elif len(old) < 3 or not old[2] or old[2] != record["hash"]:
             # Older rows may have been hashed before English character names
             # were translated.  Compare normalized visible text as a migration
@@ -619,13 +634,18 @@ def compare_tl_records(rows, records):
     return result
 
 
-def record_to_row(record, detected_at, existing_row=None):
+def record_to_row(record, detected_at, existing_row=None, refresh_only=False):
     """Build the WorryChefs TL sheet row, preserving the original detect time."""
     first_seen = existing_row[3] if existing_row and len(existing_row) > 3 and existing_row[3] else detected_at
-    updated = detected_at if existing_row else ""
-    previous = record.get("previous_text", "") if existing_row else ""
+    if refresh_only:
+        updated = existing_row[4] if len(existing_row) > 4 else ""
+        previous = existing_row[7] if len(existing_row) > 7 else ""
+    else:
+        updated = detected_at if existing_row else ""
+        previous = record.get("previous_text", "") if existing_row else ""
     return [record["key"], record["text"], record["hash"], first_seen, updated,
-            record["source"], record["url"], previous]
+            record["source"], record["url"], previous,
+            record.get("source_comparison", "")]
 
 
 def prepare_sheet_changes(sheet_rows, records, detected_at):
@@ -643,9 +663,25 @@ def prepare_sheet_changes(sheet_rows, records, detected_at):
             updates.append((old[0], new_row))
         else:
             inserts.append(new_row)
+    changed_keys = {record["key"] for record in changed}
+    for record in records:
+        old = existing.get(record["key"])
+        if not old or record["key"] in changed_keys or not record.get("source_comparison"):
+            continue
+        old_row = old[1]
+        if (
+            len(old_row) <= 8 or old_row[8] != record["source_comparison"]
+            or len(old_row) <= 2 or old_row[2] != record["hash"]
+            or len(old_row) <= 1 or old_row[1] != record["text"]
+        ):
+            updates.append((
+                old[0], record_to_row(record, detected_at, old_row, refresh_only=True)
+            ))
     header = list(rows[0]) if rows and len(rows[0]) >= 7 else list(TL_HEADERS)
     if "投稿直前本文" not in header:
         header.append("投稿直前本文")
+    if "比較元本文" not in header:
+        header.append("比較元本文")
     for _, row in updates:
         while len(row) < len(header):
             row.append("")

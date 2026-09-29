@@ -50,6 +50,46 @@ TITLE_SEARCH_MARKERS = {
 }
 
 
+def _normalize_channel_url(value):
+    return str(value or "").strip().rstrip("/").lower()
+
+
+def _channel_id_from_url(value):
+    path = str(value or "").split("?", 1)[0].rstrip("/")
+    marker = "/channel/"
+    if marker not in path:
+        return ""
+    return path.split(marker, 1)[1].split("/", 1)[0].strip()
+
+
+def _excluded_channel_keys(rows):
+    ids = set()
+    urls = set()
+    for row in rows:
+        if len(row) <= 6 or not str(row[6] or "").strip():
+            continue
+        channel_id = str(row[1] if len(row) > 1 else "").strip()
+        channel_url = str(row[3] if len(row) > 3 else "").strip()
+        if channel_id:
+            ids.add(channel_id)
+        url_id = _channel_id_from_url(channel_url)
+        if url_id:
+            ids.add(url_id)
+        normalized_url = _normalize_channel_url(channel_url)
+        if normalized_url:
+            urls.add(normalized_url)
+    return ids, urls
+
+
+def _channel_row_recency(row):
+    if len(row) <= 4 or not row[4]:
+        return None
+    try:
+        return datetime.string2DateTime(row[4])
+    except (TypeError, ValueError):
+        return None
+
+
 def selected_bosses(boss_names, selection=None):
     """Return the configured boss subset for an isolated worker."""
     if selection is None:
@@ -338,9 +378,9 @@ def findYouTubeVideo(
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     sheetChannel = ss.worksheet("YouTubeチャンネル")
     channel_sheet_rows = sheetChannel.get_all_values()
-    sheetChannelIgnores = [
-        row[3] for row in channel_sheet_rows if len(row) > 6 and row[6]
-    ]
+    excluded_channel_ids, excluded_channel_urls = _excluded_channel_keys(
+        channel_sheet_rows[1:]
+    )
 
     sheetVideo = ss.worksheet("YouTube動画")
     ensure_video_headers(sheetVideo)
@@ -369,12 +409,24 @@ def findYouTubeVideo(
         youtube_handoff.video_id(url) or url for url in videoUrls
     }
     video_rows = {row[4]: (index, row) for index, row in enumerate(video_sheet_rows[1:], start=2) if len(row) > 4 and row[4]}
-    channelIds = [row[1] for row in channel_sheet_rows if len(row) > 1]
-    channel_rows = {
-        row[1]: (index, row)
-        for index, row in enumerate(channel_sheet_rows[1:], start=2)
-        if len(row) > 1 and row[1]
+    channelIds = {
+        str(row[1]).strip()
+        for row in channel_sheet_rows[1:]
+        if len(row) > 1 and str(row[1]).strip()
     }
+    channel_rows = {}
+    for index, row in enumerate(channel_sheet_rows[1:], start=2):
+        channel_id = str(row[1] if len(row) > 1 else "").strip()
+        if not channel_id:
+            continue
+        existing = channel_rows.get(channel_id)
+        if existing is None:
+            channel_rows[channel_id] = (index, row)
+            continue
+        existing_date = _channel_row_recency(existing[1])
+        candidate_date = _channel_row_recency(row)
+        if candidate_date and (not existing_date or candidate_date > existing_date):
+            channel_rows[channel_id] = (index, row)
     channel_refreshes = {}
     now = _as_utc(
         now_factory() if now_factory else DateTime.now(timezone.utc)
@@ -537,6 +589,19 @@ def findYouTubeVideo(
                     # for the relevance filter and post body.
                     video = enrich_video(video)
             videoUrl = youtube_handoff.canonical_url(video.watch_url)
+            channelId = str(getattr(video, "channel_id", "") or "").strip()
+            channelUrl = str(getattr(video, "channel_url", "") or "").strip()
+            channelId = channelId or _channel_id_from_url(channelUrl)
+            excluded = (
+                channelId in excluded_channel_ids
+                or _normalize_channel_url(channelUrl) in excluded_channel_urls
+            )
+            if excluded:
+                print(
+                    f"skip: spreadsheet-excluded channel "
+                    f"({channelId or channelUrl}): {video.title}"
+                )
+                continue
             if (
                 is_handoff_group
                 and (youtube_handoff.video_id(videoUrl) or videoUrl) in known_video_ids
@@ -605,12 +670,10 @@ def findYouTubeVideo(
             if not channelUrl or not video.channel_id:
                 print("skip: channel information is unavailable")
                 continue
-            if channelUrl in sheetChannelIgnores:
-                continue
 
             videoTitle = video.title
             publishDate = datetime.dateTime2String(video.publish_date)
-            channelId = video.channel_id
+            channelId = str(video.channel_id).strip() or _channel_id_from_url(channelUrl)
 
             if channelId in channel_rows:
                 channel_refreshes[channelId] = (
@@ -639,7 +702,7 @@ def findYouTubeVideo(
                     ]
                 )
                 print(channel_values[-1:])
-                channelIds.append(channelId)
+                channelIds.add(channelId)
 
             video_values.append(
                 build_video_sheet_row(

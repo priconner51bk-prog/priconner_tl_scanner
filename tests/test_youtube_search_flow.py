@@ -69,6 +69,52 @@ def test_find_youtube_video_records_new_video_and_channel():
     assert channel_sheet.inserted[0][1] == "ch1"
 
 
+def test_find_youtube_video_skips_channel_marked_scan_excluded():
+    now = datetime(2026, 9, 10, tzinfo=timezone.utc)
+    video = SimpleNamespace(
+        watch_url="https://www.youtube.com/watch?v=excluded",
+        title="BossA プリコネ クラバト 4段階目 TL",
+        description="Priconne TL video",
+        tags=["tl"],
+        publish_date=now - timedelta(hours=1),
+        channel_id="ch-excluded",
+        channel_url="https://www.youtube.com/channel/ch-excluded/",
+    )
+    channel_sheet = FakeSheet(
+        [
+            ["h"] * 7,
+            ["", "ch-excluded", "ignored", "https://www.youtube.com/channel/ch-excluded", "", "", "TRUE"],
+        ]
+    )
+    video_sheet = FakeSheet([["h"] * 5])
+    boss_sheet = FakeSheet([["h"], ["BossA"]])
+    spreadsheet = SimpleNamespace(
+        worksheet=lambda name: {
+            "YouTubeチャンネル": channel_sheet,
+            "YouTube動画": video_sheet,
+            "ボス名": boss_sheet,
+        }[name]
+    )
+
+    with (
+        patch.object(youtube_search.gspread, "get_int_config_value", return_value=7),
+        patch.object(youtube_search.gspread, "get_config_value", return_value="days"),
+    ):
+        youtube_search.findYouTubeVideo(
+            spreadsheet=spreadsheet,
+            search_factory=lambda _keywords: [video],
+            channel_factory=lambda _url: SimpleNamespace(channel_name="chan"),
+            post=lambda *_args: None,
+            notify=lambda *_args: None,
+            write_urls=lambda *_args: None,
+            sleep=lambda *_args: None,
+            now_factory=lambda: now,
+        )
+
+    assert video_sheet.inserted == []
+    assert channel_sheet.inserted == []
+
+
 def test_find_youtube_video_processes_new_handoff_video_id():
     now = datetime(2026, 9, 10, tzinfo=timezone.utc)
     video = SimpleNamespace(

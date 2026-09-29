@@ -181,6 +181,29 @@ def test_queue_summary_is_created_before_drain(tmp_path, monkeypatch):
     assert events[1] == "drain"
 
 
+def test_queue_summary_includes_persisted_original_message_change(tmp_path, monkeypatch):
+    import discord_utils
+
+    queue_path = tmp_path / "queue.sqlite3"
+    monitor_runner.discord_queue.enqueue_for_guilds(
+        "【差分】\n- 旧\n+ 新\n\n【現行本文】\nDiscord投稿本文: 新",
+        channel_key="boss2_tl",
+        guild_keys=["production"],
+        summary_change="削除「オートOFF」 / 追加「操作なし」",
+        path=queue_path,
+    )
+    summaries = []
+    monkeypatch.setattr(
+        discord_utils,
+        "notify_summary_to_configured_guilds",
+        lambda content, **_kwargs: summaries.append(content),
+    )
+
+    assert monitor_runner._queue_post_summary(queue_path, 0)
+    assert "状態: 更新1件" in summaries[0]
+    assert "変更点（元投稿）: 削除「オートOFF」 / 追加「操作なし」" in summaries[0]
+
+
 def test_monitor_runner_main_skips_when_lock_busy():
     with tempfile.TemporaryDirectory() as directory, patch.object(
         monitor_runner, "acquire_lock", side_effect=runtime_utils.LockBusy()
