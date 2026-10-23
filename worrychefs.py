@@ -384,12 +384,31 @@ def formation_info_md(html, code, manual_layout=False):
     return "\n".join(lines)
 
 
-def load_worrychefs_sources(path=None):
+def load_worrychefs_sources(path=None, spreadsheet=None):
     path = Path(path or Path(__file__).with_name("worrychefs_sources.json"))
     with path.open(encoding="utf-8") as stream:
         config = json.load(stream)
-    spreadsheet_id = config["spreadsheet_id"]
-    return [dict(source, spreadsheet_id=spreadsheet_id) for source in config["sources"]]
+    source_names = {
+        str(source["gid"]).strip(): source["name"]
+        for source in config.get("sources", [])
+        if source.get("gid") and source.get("name")
+    }
+    ss = spreadsheet or gspread.getNewArrivalsSheet()
+    rows = ss.worksheet("WorryChefs").get_all_values()
+    sources = []
+    for row in rows[1:]:
+        spreadsheet_id = str(row[0] if row else "").strip()
+        gid = str(row[1] if len(row) > 1 else "").strip()
+        # This worksheet is the live allowlist. Never fall back to a cached ID
+        # in the local source manifest when an entry was removed or cleared.
+        if not spreadsheet_id or not gid:
+            continue
+        sources.append({
+            "name": source_names.get(gid, f"sheet-{gid}"),
+            "gid": gid,
+            "spreadsheet_id": spreadsheet_id,
+        })
+    return sources
 
 
 def collect_worrychefs_records(sources, http_get=requests.get, timeout=10,
@@ -764,11 +783,15 @@ def scan_configured_worrychefs(spreadsheet=None, now_factory=datetime.now,
     repost_new = bool(os.environ.get("PRICONNER_REPOST_NEW"))
     if repost_new:
         test_only = False
-    post_guild_keys = discord.configured_guild_keys(test_only=test_only)
     ss = spreadsheet or gspread.getNewArrivalsSheet()
+    sources = load_worrychefs_sources(spreadsheet=ss)
+    if not sources:
+        print("WorryChefs対象IDが未設定のためスキャンをスキップ")
+        return []
+    post_guild_keys = discord.configured_guild_keys(test_only=test_only)
     sheet = ss.worksheet("WorryChefs TL")
     sheet_rows = sheet.get_all_values()
-    records = collect_worrychefs_records(load_worrychefs_sources())
+    records = collect_worrychefs_records(sources)
     if target_month:
         month_records = [record for record in records
                          if record_matches_month(record, sheet_rows, target_month)]

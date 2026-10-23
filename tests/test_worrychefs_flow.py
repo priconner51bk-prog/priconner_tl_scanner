@@ -1,5 +1,6 @@
 ﻿"""End-to-end test for the WorryChefs orchestration flow."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -85,3 +86,58 @@ def test_worrychefs_skips_when_no_valid_source():
         )
 
     assert tl_sheet.inserted == []
+
+
+def test_configured_sources_do_not_fall_back_to_removed_spreadsheet_id(tmp_path):
+    manifest = tmp_path / "worrychefs_sources.json"
+    manifest.write_text(json.dumps({
+        "spreadsheet_id": "old-published-sheet-id",
+        "sources": [{"name": "simple", "gid": "171060579"}],
+    }), encoding="utf-8")
+    source_sheet = FakeSheet([[
+        "スプレッドシートID", "gid"], ["", "171060579"]
+    ])
+    spreadsheet = SimpleNamespace(worksheet=lambda _name: source_sheet)
+
+    assert worrychefs.load_worrychefs_sources(
+        path=manifest, spreadsheet=spreadsheet
+    ) == []
+
+
+def test_configured_sources_use_only_spreadsheet_ids_in_live_allowlist(tmp_path):
+    manifest = tmp_path / "worrychefs_sources.json"
+    manifest.write_text(json.dumps({
+        "spreadsheet_id": "old-published-sheet-id",
+        "sources": [{"name": "simple", "gid": "171060579"}],
+    }), encoding="utf-8")
+    source_sheet = FakeSheet([[
+        "スプレッドシートID", "gid"], ["new-published-sheet-id", "171060579"]
+    ])
+    spreadsheet = SimpleNamespace(worksheet=lambda _name: source_sheet)
+
+    assert worrychefs.load_worrychefs_sources(
+        path=manifest, spreadsheet=spreadsheet
+    ) == [{
+        "name": "simple",
+        "gid": "171060579",
+        "spreadsheet_id": "new-published-sheet-id",
+    }]
+
+
+def test_configured_scan_stops_before_reading_tl_sheet_when_allowlist_is_empty():
+    source_sheet = FakeSheet([[
+        "スプレッドシートID", "gid"], ["", "171060579"]
+    ])
+
+    def worksheet(name):
+        if name == "WorryChefs":
+            return source_sheet
+        raise AssertionError(f"unexpected worksheet access: {name}")
+
+    spreadsheet = SimpleNamespace(worksheet=worksheet)
+    with patch.object(worrychefs.discord, "configured_guild_keys", return_value=[]), \
+            patch.object(worrychefs, "collect_worrychefs_records") as collect:
+        assert worrychefs.scan_configured_worrychefs(
+            spreadsheet=spreadsheet
+        ) == []
+    collect.assert_not_called()
