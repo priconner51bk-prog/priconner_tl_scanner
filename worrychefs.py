@@ -42,6 +42,16 @@ TL_HEADERS = [
     "種別", "元シートURL", "投稿直前本文", "比較元本文",
 ]
 
+_PUBLISHED_TL_TAB_NAMES = {
+    "D tier Simple TLs": "simple",
+    "D tier Overtime": "overtime",
+    **{f"D{boss} Manual": f"manual-d{boss}" for boss in range(1, 6)},
+}
+_PUBLISHED_TAB_PATTERN = re.compile(
+    r'items\.push\(\{name: "((?:\\.|[^"])*)", pageUrl: .*?'
+    r'gid: "(\d+)"',
+)
+
 _character_aliases_cache = None
 _formation_labels_cache = {}
 _formation_source_labels = {}
@@ -396,6 +406,7 @@ def load_worrychefs_sources(path=None, spreadsheet=None):
     ss = spreadsheet or gspread.getNewArrivalsSheet()
     rows = ss.worksheet("WorryChefs").get_all_values()
     sources = []
+    published_tabs_by_id = {}
     for row in rows[1:]:
         spreadsheet_id = str(row[0] if row else "").strip()
         gid = str(row[1] if len(row) > 1 else "").strip()
@@ -403,12 +414,46 @@ def load_worrychefs_sources(path=None, spreadsheet=None):
         # in the local source manifest when an entry was removed or cleared.
         if not spreadsheet_id or not gid:
             continue
+        name = source_names.get(gid)
+        if name:
+            sources.append({"name": name, "gid": gid, "spreadsheet_id": spreadsheet_id})
+            continue
+
+        if spreadsheet_id not in published_tabs_by_id:
+            url = f"https://docs.google.com/spreadsheets/d/e/{spreadsheet_id}/pubhtml"
+            html = fetch_html(url, timeout=10, retries=1)
+            published_tabs_by_id[spreadsheet_id] = _published_worrychefs_tabs(html)
+        published_tabs = published_tabs_by_id[spreadsheet_id]
+        if published_tabs.get(gid) == "TL Summary":
+            # The configured gid is the workbook's index page. Expand only to
+            # the known D-tier TL tabs, leaving summaries, guides, and archives
+            # out of the scan.
+            for tab_gid, tab_title in published_tabs.items():
+                tab_name = _PUBLISHED_TL_TAB_NAMES.get(tab_title)
+                if tab_name:
+                    sources.append({
+                        "name": tab_name,
+                        "gid": tab_gid,
+                        "spreadsheet_id": spreadsheet_id,
+                    })
+            continue
+
         sources.append({
-            "name": source_names.get(gid, f"sheet-{gid}"),
+            "name": f"sheet-{gid}",
             "gid": gid,
             "spreadsheet_id": spreadsheet_id,
         })
     return sources
+
+
+def _published_worrychefs_tabs(html):
+    """Return published workbook gid-to-title metadata from its tab switcher."""
+    tabs = {}
+    for match in _PUBLISHED_TAB_PATTERN.finditer(html or ""):
+        title, gid = match.groups()
+        title = title.replace(r"\/", "/").replace(r"\x26", "&")
+        tabs[gid] = title
+    return tabs
 
 
 def collect_worrychefs_records(sources, http_get=requests.get, timeout=10,

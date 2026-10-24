@@ -124,6 +124,36 @@ def test_configured_sources_use_only_spreadsheet_ids_in_live_allowlist(tmp_path)
     }]
 
 
+def test_configured_summary_source_expands_to_published_d_tl_tabs(tmp_path):
+    manifest = tmp_path / "worrychefs_sources.json"
+    manifest.write_text(json.dumps({"sources": []}), encoding="utf-8")
+    source_sheet = FakeSheet([
+        ["スプレッドシートID", "gid"], ["published-id", "171060579"]
+    ])
+    spreadsheet = SimpleNamespace(worksheet=lambda _name: source_sheet)
+    published_html = (
+        'items.push({name: "TL Summary", pageUrl: "summary", gid: "171060579"});'
+        'items.push({name: "B tier", pageUrl: "b-tier", gid: "455354528"});'
+        'items.push({name: "D tier Simple TLs", pageUrl: "simple", gid: "1391911131"});'
+        'items.push({name: "D tier Overtime", pageUrl: "overtime", gid: "835537673"});'
+        'items.push({name: "D1 Manual", pageUrl: "manual-1", gid: "1305029905"});'
+        'items.push({name: "D5 Manual", pageUrl: "manual-5", gid: "311078222"});'
+        'items.push({name: "D tier Archives", pageUrl: "archives", gid: "1329829672"});'
+    )
+
+    with patch.object(worrychefs, "fetch_html", return_value=published_html):
+        sources = worrychefs.load_worrychefs_sources(
+            path=manifest, spreadsheet=spreadsheet
+        )
+
+    assert sources == [
+        {"name": "simple", "gid": "1391911131", "spreadsheet_id": "published-id"},
+        {"name": "overtime", "gid": "835537673", "spreadsheet_id": "published-id"},
+        {"name": "manual-d1", "gid": "1305029905", "spreadsheet_id": "published-id"},
+        {"name": "manual-d5", "gid": "311078222", "spreadsheet_id": "published-id"},
+    ]
+
+
 def test_configured_scan_stops_before_reading_tl_sheet_when_allowlist_is_empty():
     source_sheet = FakeSheet([[
         "スプレッドシートID", "gid"], ["", "171060579"]
