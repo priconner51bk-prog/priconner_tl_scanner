@@ -4,6 +4,7 @@ import os
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from runtime_utils import LockBusy, acquire_lock, default_runtime_dir
 from youtube_common import VIDEO_HEADERS
@@ -50,23 +51,60 @@ def ensure_video_headers(sheet_video):
     )
 
 
+def _normalized_channel_url(value):
+    """Normalize a YouTube channel URL for registry duplicate checks."""
+    parsed = urlsplit(str(value or "").strip())
+    host = (parsed.hostname or "").lower()
+    if host in {"www.youtube.com", "m.youtube.com", "youtube.com"}:
+        host = "youtube.com"
+    path = parsed.path.rstrip("/")
+    if path.startswith("/@"):
+        path = path.lower()
+    return f"{host}{path}" if host and path else ""
+
+
+def _channel_id_from_url(value):
+    path = urlsplit(str(value or "").strip()).path.rstrip("/")
+    prefix = "/channel/"
+    if path.startswith(prefix):
+        return path[len(prefix):].split("/", 1)[0].strip()
+    return ""
+
+
 def persist_rows(sheet_channel, sheet_video, channel_values, video_values):
     """Insert only new channel IDs and video URLs in one place."""
     ensure_video_headers(sheet_video)
     if channel_values:
         with _locked_channel_registry():
-            existing_channels = {
-                str(row[1]).strip()
-                for row in sheet_channel.get_all_values()[1:]
-                if len(row) > 1 and str(row[1]).strip()
-            }
+            existing_rows = sheet_channel.get_all_values()[1:]
+            seen_channel_ids = set()
+            seen_channel_urls = set()
+            for row in existing_rows:
+                channel_id = str(row[1] if len(row) > 1 else "").strip()
+                channel_url = _normalized_channel_url(row[3] if len(row) > 3 else "")
+                url_channel_id = _channel_id_from_url(row[3] if len(row) > 3 else "")
+                if channel_id:
+                    seen_channel_ids.add(channel_id)
+                if url_channel_id:
+                    seen_channel_ids.add(url_channel_id)
+                if channel_url:
+                    seen_channel_urls.add(channel_url)
             unique_channels = []
-            seen_channels = set(existing_channels)
             for row in channel_values:
                 channel_id = str(row[1] if len(row) > 1 else "").strip()
-                if channel_id and channel_id not in seen_channels:
+                channel_url = _normalized_channel_url(row[3] if len(row) > 3 else "")
+                url_channel_id = _channel_id_from_url(row[3] if len(row) > 3 else "")
+                if (
+                    channel_id
+                    and channel_id not in seen_channel_ids
+                    and (not channel_url or channel_url not in seen_channel_urls)
+                ):
                     unique_channels.append(row)
-                    seen_channels.add(channel_id)
+                    seen_channel_ids.add(channel_id)
+                    if url_channel_id:
+                        seen_channel_ids.add(url_channel_id)
+                    if channel_url:
+                        seen_channel_urls.add(channel_url)
             if unique_channels:
                 sheet_channel.insert_rows(unique_channels, row=2)
 
